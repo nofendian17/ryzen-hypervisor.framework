@@ -885,7 +885,12 @@ IOReturn com_overlorddev_RyzenHVVm::run(bool skipInstruction, RHVExit *out)
     for (;;) {
         if (needRescan) {             /* outside the page-table lock and with interrupts on: it runs a rendezvous and may allocate */
             needRescan = false;
+            /* Deadlock guard: rescan() takes gRescanLock and does mp_rendezvous_no_intrs, which needs every
+             * CPU to be able to service interrupts. Another CPU spinning on fLock at raised IPL would wedge it.
+             * Drop fLock around the rendezvous; the VMCB page itself doesn't move, so just re-acquire. */
+            IOLockUnlock(fLock);
             svm::rescan();
+            IOLockLock(fLock);
         }
         if (fKick) {                  /* hv_vcpu_interrupt from another thread */
             if (injectionWaiting()) {

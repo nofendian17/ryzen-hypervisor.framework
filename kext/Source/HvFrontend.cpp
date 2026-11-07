@@ -179,6 +179,8 @@ struct HvVcpu {
 };
 struct HvVm {
     IOLock *lock;
+    volatile int inFlight;             /* traps currently holding this VM (guarded by `lock`) */
+    bool     dying;                    /* tVmDestroy has claimed it; new traps must fail with Busy */
     IOBufferMemoryDescriptor *md[3];   /* rw, ro, commpage */
     IOMemoryMap *map[3];
     uint8_t *kva[3];
@@ -245,6 +247,31 @@ uint32_t xsaveBytes()
     if (c < 0x240 || c > 0x4000)
         c = 0x340;                                  /* a size every AVX-capable CPU fits in; the framework only reads it */
     return c;
+}
+
+/* Every per-VM trap must pin the VM before touching it: tVmDestroy can otherwise free it mid-trap. */
+inline bool vmPin(HvVm *vm)
+{
+    if (!vm)
+        return false;
+    IOLockLock(vm->lock);
+    if (vm->dying) {
+        IOLockUnlock(vm->lock);
+        return false;
+    }
+    vm->inFlight++;
+    IOLockUnlock(vm->lock);
+    return true;
+}
+
+inline void vmUnpin(HvVm *vm)
+{
+    if (!vm)
+        return;
+    IOLockLock(vm->lock);
+    if (vm->inFlight > 0)
+        vm->inFlight--;
+    IOLockUnlock(vm->lock);
 }
 
 void vmFree(HvVm *vm)
@@ -403,9 +430,12 @@ kern_return_t tVmDestroy(void *target, uint64_t arg)
         return kHvNoDev;
     IOLockLock(vm->lock);
     unsigned n = vm->nVcpus;
+    int inflight = vm->inFlight;
+    if (!n && !inflight)
+        vm->dying = true;
     IOLockUnlock(vm->lock);
-    if (n)
-        return kHvBusy;
+    if (n || inflight)
+        return kHvBusy;                              /* a trap or vCPU still holds it: never free under it */
     const bool logIt = !vm->hyperkit;
     hv_set_task_target(nullptr);
     vmFree(vm);
@@ -463,13 +493,21 @@ kern_return_t tVcpuCreate(void *target, uint64_t arg)
     HvVm *vm = static_cast<HvVm *>(target);
     if (!vm)
         return kHvNoDev;
+    if (!vmPin(vm))
+        return kHvBusy;
     struct { uint64_t idPtr, flags; } a = {0, 0};
-    if (copyin((user_addr_t)arg, &a, sizeof(a)))
+    if (copyin((user_addr_t)arg, &a, sizeof(a))) {
+        vmUnpin(vm);
         return kHvError;
-    if (a.flags > 3)
+    }
+    if (a.flags > 3) {
+        vmUnpin(vm);
         return kHvBadArg;
-    if (hv_get_thread_target())
+    }
+    if (hv_get_thread_target()) {
+        vmUnpin(vm);
         return kHvBusy;                              /* this thread owns a vCPU already */
+    }
 
     /* The slot the calling thread's name asks for, -1 when there is none. Only HyperKit asserts the
      * contract, so only its VMs are scanned; the window is the same user memory the trap log reads. */
@@ -480,11 +518,15 @@ kern_return_t tVcpuCreate(void *target, uint64_t arg)
             hint = vcpuNameHint(w, sizeof(w));
     }
 
-    if (!gSvc)
+    if (!gSvc) {
+        vmUnpin(vm);
         return kHvNoDev;
+    }
     HvVcpu *v = (HvVcpu *)IOMallocZero(sizeof(HvVcpu));
-    if (!v)
+    if (!v) {
+        vmUnpin(vm);
         return kHvNoRes;
+    }
     {
         rhv::svm::rescan();       /* CPUs that came online after the kext started */
         RHVInfo info;
@@ -494,6 +536,7 @@ kern_return_t tVcpuCreate(void *target, uint64_t arg)
         if (!v->cpu) {
             RHV_WARN("hv front end: cannot create the vCPU object (0x%x)", err);
             IOFree(v, sizeof(HvVcpu));
+            vmUnpin(vm);
             return hvFromIoEarly(err);
         }
     }
@@ -514,6 +557,7 @@ kern_return_t tVcpuCreate(void *target, uint64_t arg)
         IOLockUnlock(vm->lock);
         v->cpu->release();
         IOFree(v, sizeof(HvVcpu));
+        vmUnpin(vm);
         return kHvNoDev;
     }
     v->vm = vm;
@@ -547,10 +591,12 @@ kern_return_t tVcpuCreate(void *target, uint64_t arg)
         IOLockUnlock(vm->lock);
         v->cpu->release();
         IOFree(v, sizeof(HvVcpu));
+        vmUnpin(vm);
         return kHvError;
     }
     fpuToPage(v);                                    /* initial FP state and XCR0 into the page */
     hv_set_thread_target(v);
+    vmUnpin(vm);
     return kHvOk;
 }
 
@@ -1382,37 +1428,64 @@ inline bool apicPageSkipped(const HvVm *vm, const MapItem &it)
 kern_return_t tVmMap(void *target, uint64_t arg)
 {
     note(HV_TASK_TRAP, 4, arg);
+    HvVm *vm = static_cast<HvVm *>(target);
+    if (!vmPin(vm))
+        return kHvNoDev;
     MapItem it;
-    kern_return_t k = mapItem(static_cast<HvVm *>(target), arg, &it);
-    if (k)
+    kern_return_t k = mapItem(vm, arg, &it);
+    if (k) {
+        vmUnpin(vm);
         return k;
-    if (apicPageSkipped(static_cast<HvVm *>(target), it))
+    }
+    if (apicPageSkipped(vm, it)) {
+        vmUnpin(vm);
         return kHvOk;
-    return hvFromIo(static_cast<HvVm *>(target)->shared->map(current_task(), it.uva, it.gpa, it.size, (uint32_t)it.flags));
+    }
+    kern_return_t rc = hvFromIo(vm->shared->map(current_task(), it.uva, it.gpa, it.size, (uint32_t)it.flags));
+    vmUnpin(vm);
+    return rc;
 }
 
 kern_return_t tVmUnmap(void *target, uint64_t arg)
 {
     note(HV_TASK_TRAP, 5, arg);
+    HvVm *vm = static_cast<HvVm *>(target);
+    if (!vmPin(vm))
+        return kHvNoDev;
     MapItem it;
-    kern_return_t k = mapItem(static_cast<HvVm *>(target), arg, &it);
-    if (k)
+    kern_return_t k = mapItem(vm, arg, &it);
+    if (k) {
+        vmUnpin(vm);
         return k;
-    if (apicPageSkipped(static_cast<HvVm *>(target), it))
+    }
+    if (apicPageSkipped(vm, it)) {
+        vmUnpin(vm);
         return kHvOk;
-    return hvFromIo(static_cast<HvVm *>(target)->shared->unmap(it.gpa, it.size));
+    }
+    kern_return_t rc = hvFromIo(vm->shared->unmap(it.gpa, it.size));
+    vmUnpin(vm);
+    return rc;
 }
 
 kern_return_t tVmProtect(void *target, uint64_t arg)
 {
     note(HV_TASK_TRAP, 6, arg);
+    HvVm *vm = static_cast<HvVm *>(target);
+    if (!vmPin(vm))
+        return kHvNoDev;
     MapItem it;
-    kern_return_t k = mapItem(static_cast<HvVm *>(target), arg, &it);
-    if (k)
+    kern_return_t k = mapItem(vm, arg, &it);
+    if (k) {
+        vmUnpin(vm);
         return k;
-    if (apicPageSkipped(static_cast<HvVm *>(target), it))
+    }
+    if (apicPageSkipped(vm, it)) {
+        vmUnpin(vm);
         return kHvOk;
-    return hvFromIo(static_cast<HvVm *>(target)->shared->protect(it.gpa, it.size, (uint32_t)it.flags));
+    }
+    kern_return_t rc = hvFromIo(vm->shared->protect(it.gpa, it.size, (uint32_t)it.flags));
+    vmUnpin(vm);
+    return rc;
 }
 
 /* hv_vmx_vcpu_set_apic_address: the client tells where its virtual-APIC page is when it uses the TPR shadow. The core keeps the TPR in V_TPR and never

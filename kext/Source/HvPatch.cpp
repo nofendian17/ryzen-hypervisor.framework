@@ -235,13 +235,49 @@ unsigned allCalls(const uint8_t *code, size_t span, const uint8_t *out[], unsign
     return n;
 }
 
+/* The candidate must live next to the exported anchor it was walked from: the callee we want sits in the
+ * same small function in bsd/kern/kern_cs.c, a few hundred bytes away, never megabytes away and never
+ * outside the kernel text. A target outside that window is a mis-decode of the call walk on an
+ * unexpected kernel build (the panic that prompted this, Darwin 25.6.0); calling it page-faults on
+ * user memory. Refusing it leaves the flags alone instead of panicking.
+ *
+ * On top of that the candidate must look like a real function entry, not the middle of one: the blind
+ * call-walk also happily decodes an `e8` byte that sits inside an immediate, landing mid-instruction.
+ * Calling that as `(proc, flags)` is what page-faulted the client. We therefore require the standard
+ * x86_64 prologue (push rbp; mov rbp rsp) and a function-sized window (proc_csflags_update is a
+ * ~20-byte setter in kern_cs.c, so anything that needs a whole kilobyte to guess at is not it). */
+bool candidateNear(const uint8_t *candidate, const uint8_t *anchor)
+{
+    if (!candidate || !anchor)
+        return false;
+    if (candidate == anchor)
+        return false;
+    const intptr_t d = (intptr_t)(candidate - anchor);
+    if (d < -(intptr_t)0x10000 || d > (intptr_t)0x10000)
+        return false;
+    /* Kernel text is always in the 0xffffff80 high range; user addresses (0x7f…) are never a callee. */
+    if ((uintptr_t)candidate < (uintptr_t)0xffffff8000000000ull ||
+        (uintptr_t)candidate >= (uintptr_t)0xffffffa000000000ull)
+        return false;
+    /* Function entry, not mid-function: push rbp; mov rbp,rsp (clang -O2 prologue). */
+    if (candidate[0] != 0x55 || candidate[1] != 0x48 || candidate[2] != 0x89 || candidate[3] != 0xe5)
+        return false;
+    return true;
+}
+
 /* Calls one candidate for proc_csflags_update with the wanted flags and reads them back. Returns the
  * candidate when it produced exactly them. See the comment above for why a wrong candidate cannot
- * remove or corrupt a flag here. */
-proc_csflags_update_t tryCandidate(proc_t p, void *addr, uint64_t want, uint64_t before)
+ * remove or corrupt a flag here. `anchor` is the exported function the candidate was walked from. */
+proc_csflags_update_t tryCandidate(proc_t p, void *addr, uint64_t want, uint64_t before, const uint8_t *anchor)
 {
     if (!addr)
         return nullptr;
+    if (!candidateNear(static_cast<const uint8_t *>(addr), anchor)) {
+        RHV_WARN("client fix-ups: candidate %#llx is not near %#llx, not called (kernel not as expected), "
+                 "without amfi_get_out_of_my_way=0x1 it may be killed after the patch",
+                 (unsigned long long)(uintptr_t)addr, (unsigned long long)(uintptr_t)anchor);
+        return nullptr;
+    }
     reinterpret_cast<proc_csflags_update_t>(addr)(p, want);
     uint64_t after = 0;
     if (proc_csflags(p, &after) != 0)
@@ -274,15 +310,19 @@ void relaxSigning(const char *name)
     if (!(flags & (kCsKill | kCsHard)) && !(flags & kCsEnforcement))
         return;                                    /* nothing enforced for it: an AMFI-relaxed machine */
 
-    const uint64_t want = (flags & ~(kCsKill | kCsHard)) | kCsDebugged;
-
-    /* The exported part of the state: CS_ENFORCEMENT off, in the process and in its address space. */
+    /* The exported part of the state: CS_ENFORCEMENT off, in the process and in its address space.
+     * Done first so `want` is computed from the post-disable flags below, not the pre-disable ones:
+     * computing it from `flags` would re-apply CS_ENFORCEMENT right after clearing it. */
     csproc_disable_enforcement(p);
     uint64_t now = 0;
     if (proc_csflags(p, &now) != 0)
         return;
     if (now & kCsEnforcement)
         RHV_WARN("client fix-ups: csproc_disable_enforcement left CS_ENFORCEMENT set for %s (not the expected kernel)", name);
+
+    /* want: KILL/HARD/ENFORCEMENT off, DEBUGGED on (what cs_allow_invalid() leaves on a traced process). */
+    const constexpr uint64_t kCsEnforceMask = kCsKill | kCsHard | kCsEnforcement;
+    const uint64_t want = (now & ~kCsEnforceMask) | kCsDebugged;
 
     /* Where proc_csflags_update hides on this kernel, strongest anchor first. Every candidate is verified by
      * effect (tryCandidate), so a wrong guess cannot damage the flags.
@@ -304,7 +344,7 @@ void relaxSigning(const char *name)
              * by the call it feeds, which names proc_csflags_set or the inlined proc_csflags_update. */
             uint8_t *via = callAfterMovEsiImm(anchors[0], 128, 0x20);
             if (via) {
-                update = tryCandidate(p, via, want, now);   /* proc_csflags_update, when the kernel inlined it there */
+                update = tryCandidate(p, via, want, now, anchors[0]);   /* proc_csflags_update, when the kernel inlined it there */
                 if (update)
                     continue;
             }
@@ -313,7 +353,7 @@ void relaxSigning(const char *name)
          * mov-esi target above, when found, is among them (and is tried again harmlessly). */
         const unsigned n = allCalls(anchors[a], 128, cands, 6);
         for (unsigned i = 0; i < n && !update; i++)
-            update = tryCandidate(p, const_cast<uint8_t *>(cands[i]), want, now);
+            update = tryCandidate(p, const_cast<uint8_t *>(cands[i]), want, now, anchors[a]);
     }
     uint64_t done = 0;
     if (update && proc_csflags(p, &done) != 0)
@@ -420,6 +460,17 @@ void fixCurrentClient()
             const mach_vm_address_t at = s.atOrig;
             if (copyin((user_addr_t)at, cur, (user_size_t)s.orig.n)) {
                 RHV_WARN("client fix-ups: %s: cannot read the code again", pt.name);
+                continue;
+            }
+            /* TOCTOU: the scan matched the original bytes, but the re-read `cur` may differ if another
+             * thread JIT'd or remapped the page. Abort unless it still matches the original exactly. */
+            bool matches = true;
+            for (int k = 0; k < s.orig.n; k++)
+                if (!s.orig.w[k] && cur[k] != s.orig.v[k])
+                    matches = false;
+            if (!matches) {
+                RHV_WARN("client fix-ups: %s: code at %#llx changed since the scan, left alone", pt.name,
+                         (unsigned long long)at);
                 continue;
             }
             for (int k = 0; k < s.orig.n; k++)
