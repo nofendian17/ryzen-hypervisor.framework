@@ -37,6 +37,8 @@ test: | $(BUILD)
 	$(BUILD)/patch_test
 	$(CC) -Wall -Wextra -Werror -fsanitize=address,undefined -g -DRHV_HKPATCH_NO_MAIN -o $(BUILD)/hkpatch_test tests/hkpatch_test.c tools/rhv-hkpatch/main.c shim/rhv_patch.c
 	$(BUILD)/hkpatch_test
+	$(CC) -Wall -Wextra -Werror -fsanitize=address,undefined -O2 -o $(BUILD)/signing_test tests/signing_test.c
+	$(BUILD)/signing_test
 	$(CC) -arch x86_64 -Wall -Wextra -Werror -Wno-nullability-completeness -fsanitize=address,undefined -g -o $(BUILD)/shim_core_test tests/shim_core_test.c shim/rhv_core.c -framework Hypervisor
 	$(BUILD)/shim_core_test
 
