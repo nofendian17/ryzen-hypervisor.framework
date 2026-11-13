@@ -1305,9 +1305,12 @@ void start(com_amdhv_AMDHV *service)
         return;
     if (!setMode(v))
         return;
-    /* kern.hv_support = 1 by default once the traps are registered: QEMU (and other clients) check the sysctl before they try Hypervisor.framework. */
+    /* kern.hv_support = 1 by default once the traps are registered: QEMU (and other clients) check the sysctl
+     * before they try Hypervisor.framework. PE_parse_boot_argn returns false when the argument is absent, so
+     * parse first and only test the value: absent means the default (1), amdhv_hv_sysctl=0 means leave it. */
     uint32_t sc = 1;
-    if (PE_parse_boot_argn("amdhv_hv_sysctl", &sc, sizeof(sc)) && sc)
+    PE_parse_boot_argn("amdhv_hv_sysctl", &sc, sizeof(sc));
+    if (sc)
         setSysctl(true);
 }
 
