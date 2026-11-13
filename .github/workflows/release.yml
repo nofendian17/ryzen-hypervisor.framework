@@ -1,0 +1,55 @@
+name: Release
+
+# Builds AMDHV.kext and the tools on a GitHub macOS runner, packages them with
+# the sources into one archive, and attaches it to a GitHub Release.
+#
+#   Trigger:  push a tag (v0.1.0, ...) or run it by hand from the Actions tab.
+#   The tag should match the version in kext/Info.plist.
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build kext and tools
+        run: make kext tools
+
+      - name: Verify build outputs are x86_64
+        run: |
+          file build/AMDHV.kext/Contents/MacOS/AMDHV
+          lipo -info build/amd-info build/hvf-smoke
+          file build/AMDHV.kext/Contents/MacOS/AMDHV | grep -q x86_64
+
+      - name: Package
+        run: |
+          V="${GITHUB_REF_NAME#v}"
+          STAGE="amdhv-${V}"
+          mkdir -p "$STAGE"
+          git archive HEAD | tar -x -C "$STAGE"
+          mkdir -p "$STAGE/build"
+          cp -R build/AMDHV.kext "$STAGE/build/"
+          cp build/amd-info build/hvf-smoke "$STAGE/build/"
+          tar -czf "amdhv-${V}-macos-x86_64.tar.gz" "$STAGE"
+          git archive --format=tar.gz -o "amdhv-${V}-source.tar.gz" HEAD
+          ls -la amdhv-${V}-*.tar.gz
+
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          V="${TAG#v}"
+          gh release create "$TAG" \
+            "amdhv-${V}-macos-x86_64.tar.gz" \
+            "amdhv-${V}-source.tar.gz" \
+            --title "AMDHV ${TAG}" \
+            --notes "Unsigned kext for OpenCore (Kernel -> Add). Install with scripts/install-to-efi.sh — needs the two boot-args amdhv_enable_svm=1 amdhv_hv=1. Binaries are x86_64; unit tests are meant to run on the target machine (make test)."
