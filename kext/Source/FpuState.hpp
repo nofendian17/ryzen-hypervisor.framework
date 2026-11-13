@@ -14,14 +14,14 @@
  * Layout (Intel SDM Vol. 1, 13.4, standard non-compacted format): legacy region 0..511 (x87 + MXCSR + XMM0-15),
  * XSAVE header 512..575 (XSTATE_BV at 512, XCOMP_BV at 520, rest reserved), then the components by CPUID.0xD.
  */
-#ifndef RYZENHV_FPUSTATE_HPP
-#define RYZENHV_FPUSTATE_HPP
+#ifndef AMDHV_FPUSTATE_HPP
+#define AMDHV_FPUSTATE_HPP
 
 #include <stddef.h>
 #include <stdint.h>
 #include <string.h>
 
-namespace rhv {
+namespace amdhv {
 namespace fpu {
 
 /* XCR0 state-component bits. */
@@ -150,6 +150,6 @@ static inline void xrstor(const void *area, uint64_t mask)
 }
 
 } // namespace fpu
-} // namespace rhv
+} // namespace amdhv
 
-#endif /* RYZENHV_FPUSTATE_HPP */
+#endif /* AMDHV_FPUSTATE_HPP */

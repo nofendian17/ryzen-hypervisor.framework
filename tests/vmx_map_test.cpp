@@ -15,8 +15,8 @@
 #define HAVE_SDK 1
 #endif
 
-using namespace rhv::vmx;
-using namespace rhv::vmcb;
+using namespace amdhv::vmx;
+using namespace amdhv::vmcb;
 
 namespace {
 
@@ -148,7 +148,7 @@ void testAccessRights()
         CHECK(attribFromAr(arFromAttrib((uint16_t)a)) == a);
     }
     /* Agrees with the existing helper used for the reset state. */
-    CHECK(rhv::vmcb::segAttrib(0xA09B) == attribFromAr(0xA09B));
+    CHECK(amdhv::vmcb::segAttrib(0xA09B) == attribFromAr(0xA09B));
 }
 
 SvmExit ex(uint64_t code, uint64_t i1 = 0, uint64_t i2 = 0, uint64_t rip = 0x1000, uint64_t next = 0, uint32_t perm = 0)
@@ -177,7 +177,7 @@ void testExits()
     CHECK(translateExit(ex(EXIT_MSR, 0), &v) && v.reason == VMX_RDMSR);
     CHECK(translateExit(ex(EXIT_MSR, 1), &v) && v.reason == VMX_WRMSR);
 
-    /* I/O: OUT DX,AL to 0x3F8 (what rhv-guest-test does): size 1, out. */
+    /* I/O: OUT DX,AL to 0x3F8 (what amd-guest-test does): size 1, out. */
     uint64_t outb = ((uint64_t)0x3F8 << 16) | (1u << 4);
     CHECK(translateExit(ex(EXIT_IOIO, outb), &v) && v.reason == VMX_IO);
     CHECK((v.qual & 7) == 0 && !(v.qual & 8) && ((v.qual >> 16) == 0x3F8));

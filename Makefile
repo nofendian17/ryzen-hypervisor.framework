@@ -1,19 +1,18 @@
-# Top-level build. Run on the Ryzentosh (needs Xcode command line tools).
+# Top-level build. Run on the Hackintosh (needs Xcode command line tools).
 #
 #   make test     host-side unit tests, works on any OS with a C compiler
-#   make tools    build/rhv-info, build/rhv-guest-test, build/rhv-map-test, build/rhv-vmx-test, build/rhv-long-test, build/rhv-hkpatch, build/hvf-smoke, build/hvf-ro-map-test
-#   make shim     build/libryzenhv.dylib
-#   make kext     build/RyzenHV.kext   (see kext/Makefile, best effort)
-#   make all      tools + shim + kext
+#   make tools    build/amd-info, build/hvf-smoke
+#   make kext     build/AMDHV.kext   (see kext/Makefile)
+#   make all      tools + kext
 #   make clean
 
 BUILD := build
 CC    ?= cc
 CXX   ?= c++
 
-.PHONY: all test tools shim hijack hijack-patchonly kext clean
+.PHONY: all test tools kext clean
 
-all: tools shim kext
+all: tools kext
 
 $(BUILD):
 	mkdir -p $(BUILD)
@@ -33,60 +32,15 @@ test: | $(BUILD)
 	$(BUILD)/fpu_state_test
 	$(CXX) -std=c++17 -Wall -Wextra -Werror -fsanitize=address,undefined -g -o $(BUILD)/msr_map_test tests/msr_map_test.cpp
 	$(BUILD)/msr_map_test
-	$(CC) -Wall -Wextra -Werror -fsanitize=address,undefined -g -o $(BUILD)/patch_test tests/patch_test.c shim/rhv_patch.c
-	$(BUILD)/patch_test
-	$(CC) -Wall -Wextra -Werror -fsanitize=address,undefined -g -DRHV_HKPATCH_NO_MAIN -o $(BUILD)/hkpatch_test tests/hkpatch_test.c tools/rhv-hkpatch/main.c shim/rhv_patch.c
-	$(BUILD)/hkpatch_test
-	$(CC) -Wall -Wextra -Werror -fsanitize=address,undefined -O2 -o $(BUILD)/signing_test tests/signing_test.c
-	$(BUILD)/signing_test
-	$(CC) -arch x86_64 -Wall -Wextra -Werror -Wno-nullability-completeness -fsanitize=address,undefined -g -o $(BUILD)/shim_core_test tests/shim_core_test.c shim/rhv_core.c -framework Hypervisor
-	$(BUILD)/shim_core_test
+	$(CXX) -std=c++17 -Wall -Wextra -Werror -fsanitize=address,undefined -g -o $(BUILD)/slots_test tests/slots_test.cpp
+	$(BUILD)/slots_test
 
 tools: | $(BUILD)
-	$(CC) -arch x86_64 -Wall -Wextra -O2 -o $(BUILD)/rhv-info tools/rhv-info/main.c \
-		-framework IOKit -framework CoreFoundation
-	$(CC) -arch x86_64 -Wall -Wextra -O2 -o $(BUILD)/rhv-patchcheck tools/rhv-patchcheck/main.c shim/rhv_patch.c
-	$(CC) -arch x86_64 -Wall -Wextra -O2 -o $(BUILD)/rhv-hkpatch tools/rhv-hkpatch/main.c shim/rhv_patch.c
-	$(CC) -arch x86_64 -Wall -Wextra -O2 -o $(BUILD)/rhv-guest-test tools/rhv-guest-test/main.c \
-		-framework IOKit -framework CoreFoundation
-	$(CC) -arch x86_64 -Wall -Wextra -O2 -o $(BUILD)/rhv-map-test tools/rhv-map-test/main.c \
-		-framework IOKit -framework CoreFoundation
-	$(CC) -arch x86_64 -Wall -Wextra -O2 -o $(BUILD)/rhv-vmx-test tools/rhv-vmx-test/main.c \
-		-framework IOKit -framework CoreFoundation
-	$(CC) -arch x86_64 -Wall -Wextra -O2 -o $(BUILD)/rhv-long-test tools/rhv-long-test/main.c \
+	$(CC) -arch x86_64 -Wall -Wextra -O2 -o $(BUILD)/amd-info tools/amd-info/main.c \
 		-framework IOKit -framework CoreFoundation
 	$(CC) -arch x86_64 -Wall -Wextra -Wno-nullability-completeness -O2 -o $(BUILD)/hvf-smoke tools/hvf-smoke/main.c \
 		-framework Hypervisor
-	$(CC) -arch x86_64 -Wall -Wextra -Wno-nullability-completeness -O2 -o $(BUILD)/hvf-ro-map-test tools/hvf-ro-map-test/main.c \
-		-framework Hypervisor
-	codesign -s - --force --entitlements tools/hvf-ro-map-test/hypervisor.entitlements $(BUILD)/hvf-ro-map-test
-
-SHIM_SRC := shim/hv_shim.c shim/rhv_core.c shim/rhv_iokit.c shim/rhv_patch.c
-
-shim: | $(BUILD)
-	$(CC) -arch x86_64 -Wall -Wextra -Wno-deprecated-declarations -Wno-nullability-completeness -O2 -dynamiclib \
-		-o $(BUILD)/libryzenhv.dylib $(SHIM_SRC) -framework Hypervisor -framework IOKit -framework CoreFoundation
-
-# The shim as a stand-in for one of Parallels' own libraries (see shim/hijack.c and scripts/parallels-shim.sh).
-# HIJACK_NAME is the library's file name, HIJACK_ORIG a copy of the real one with its install name changed to where the
-# real one will be found at run time (only the linker reads it).
-HIJACK_NAME ?= libPrlXmlModel.1.dylib
-HIJACK_ORIG ?= $(BUILD)/hijack-link/$(HIJACK_NAME)
-HIJACK_ORIG_RUNTIME ?= @loader_path/libPrlXmlModel.1.orig.dylib
-
-hijack: | $(BUILD)
-	@test -f "$(HIJACK_ORIG)" || { echo "run scripts/parallels-shim.sh prepare first (it makes $(HIJACK_ORIG))"; exit 1; }
-	$(CC) -arch x86_64 -Wall -Wextra -Wno-deprecated-declarations -Wno-nullability-completeness -O2 -dynamiclib -DRHV_HIJACK \
-		-install_name @rpath/$(HIJACK_NAME) -Wl,-reexport_library,$(HIJACK_ORIG) \
-		-o $(BUILD)/$(HIJACK_NAME) $(SHIM_SRC) shim/hijack.c -framework Hypervisor -framework IOKit -framework CoreFoundation
-
-# Native mode (rhv_hv=1): the same stand-in library, but it patches Parallels' vendor check and arms its keyboard (it wraps only hv_vcpu_run and hv_vcpu_run_until)
-# (shim/hijack_patchonly.c). Needs the same build/hijack-link copy of the real library.
-hijack-patchonly: | $(BUILD)
-	@test -f "$(HIJACK_ORIG)" || { echo "run scripts/parallels-shim.sh prepare first (it makes $(HIJACK_ORIG))"; exit 1; }
-	$(CC) -arch x86_64 -Wall -Wextra -O2 -dynamiclib \
-		-install_name @rpath/$(HIJACK_NAME) -Wl,-reexport_library,$(HIJACK_ORIG) \
-		-o $(BUILD)/$(HIJACK_NAME) shim/hijack_patchonly.c shim/rhv_patch.c
+	codesign -s - --force --entitlements tools/hvf-smoke/hypervisor.entitlements $(BUILD)/hvf-smoke
 
 kext:
 	$(MAKE) -C kext

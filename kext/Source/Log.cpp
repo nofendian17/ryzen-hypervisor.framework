@@ -4,13 +4,13 @@
 #include <pexpert/pexpert.h>
 #include <stdarg.h>
 
-#include "../../include/RHVRing.h"
+#include "../../include/AMDRing.h"
 #include "KernelDecls.hpp"
 #include "Log.hpp"
 
-namespace rhv {
+namespace amdhv {
 
-RHVStats gStats;
+AMDHVStats gStats;
 
 namespace log {
 namespace {
@@ -19,16 +19,16 @@ const uint32_t kRingSize = 64 * 1024;
 const uint32_t kLineMax  = 256;
 
 char          gBuf[kRingSize];
-RHVRing       gRing;
+AMDHVRing       gRing;
 IOSimpleLock *gLock;
 uint64_t      gStartTicks;
 
-#ifdef RHV_DEBUG
-volatile uint32_t gLevel = RHV_LOG_DEBUG;
+#ifdef AMDHV_DEBUG
+volatile uint32_t gLevel = AMDHV_LOG_DEBUG;
 #else
-volatile uint32_t gLevel = RHV_LOG_INFO;
+volatile uint32_t gLevel = AMDHV_LOG_INFO;
 #endif
-uint32_t gIoLogLevel = RHV_LOG_INFO;
+uint32_t gIoLogLevel = AMDHV_LOG_INFO;
 
 const char kLevelChar[] = { '-', 'E', 'W', 'I', 'D', 'T' };
 
@@ -39,25 +39,25 @@ const char kLevelChar[] = { '-', 'E', 'W', 'I', 'D', 'T' };
  * is the shape of a spinlock-acquisition timeout. In that case just append without the lock and count it;
  * a corrupted log line is far better than a panic, and the counter tells you it happened.
  */
-volatile SInt32 gLogInFlight[RHV_MAX_CPUS];
+volatile SInt32 gLogInFlight[AMDHV_MAX_CPUS];
 
 void ringAppend(const char *line, uint32_t len)
 {
     if (!gLock)
         return;
     int cpu = cpu_number();
-    if (cpu >= 0 && cpu < RHV_MAX_CPUS) {
+    if (cpu >= 0 && cpu < AMDHV_MAX_CPUS) {
         if (OSIncrementAtomic(&gLogInFlight[cpu]) != 0) {
             OSDecrementAtomic(&gLogInFlight[cpu]);
             OSIncrementAtomic64((volatile SInt64 *)&gStats.logReentries);
-            rhv_ring_write(&gRing, line, len);       /* re-entered on this CPU: best effort */
+            amdhv_ring_write(&gRing, line, len);       /* re-entered on this CPU: best effort */
             return;
         }
     }
     IOInterruptState st = IOSimpleLockLockDisableInterrupt(gLock);
-    rhv_ring_write(&gRing, line, len);
+    amdhv_ring_write(&gRing, line, len);
     IOSimpleLockUnlockEnableInterrupt(gLock, st);
-    if (cpu >= 0 && cpu < RHV_MAX_CPUS)
+    if (cpu >= 0 && cpu < AMDHV_MAX_CPUS)
         OSDecrementAtomic(&gLogInFlight[cpu]);
 }
 
@@ -65,8 +65,8 @@ void vwrite(uint32_t level, bool sync, const char *fmt, va_list ap)
 {
     if (!sync && level > gLevel)
         return;
-    if (level > RHV_LOG_TRACE)
-        level = RHV_LOG_TRACE;
+    if (level > AMDHV_LOG_TRACE)
+        level = AMDHV_LOG_TRACE;
 
     char line[kLineMax];
 
@@ -92,7 +92,7 @@ void vwrite(uint32_t level, bool sync, const char *fmt, va_list ap)
     OSAddAtomic64(len, (volatile SInt64 *)&gStats.logBytesTotal);
 
     if (sync || level <= gIoLogLevel)
-        IOLog("RyzenHV: %s", line);
+        IOLog("AMDHV: %s", line);
 }
 
 } // namespace
@@ -101,14 +101,14 @@ void init()
 {
     if (!gLock) {
         gLock = IOSimpleLockAlloc();
-        rhv_ring_init(&gRing, gBuf, kRingSize);
+        amdhv_ring_init(&gRing, gBuf, kRingSize);
         gStartTicks = mach_absolute_time();
     }
 
     uint32_t v = 0;
-    if (PE_parse_boot_argn("rhv_loglevel", &v, sizeof(v)) && v <= RHV_LOG_TRACE)
+    if (PE_parse_boot_argn("amdhv_loglevel", &v, sizeof(v)) && v <= AMDHV_LOG_TRACE)
         gLevel = v;
-    if (PE_parse_boot_argn("rhv_iolog", &v, sizeof(v)) && v <= RHV_LOG_TRACE)
+    if (PE_parse_boot_argn("amdhv_iolog", &v, sizeof(v)) && v <= AMDHV_LOG_TRACE)
         gIoLogLevel = v;
 }
 
@@ -124,17 +124,17 @@ void writeSync(const char *fmt, ...)
 {
     va_list ap;
     va_start(ap, fmt);
-    vwrite(RHV_LOG_INFO, true, fmt, ap);
+    vwrite(AMDHV_LOG_INFO, true, fmt, ap);
     va_end(ap);
 }
 
 void assertFailed(const char *expr, const char *file, int line)
 {
-    RHV_ERR("ASSERT FAILED: %s (%s:%d)", expr, file, line);
+    AMDHV_ERR("ASSERT FAILED: %s (%s:%d)", expr, file, line);
     OSIncrementAtomic64((volatile SInt64 *)&gStats.assertFailures);
 }
 
-void read(uint64_t cursor, RHVLogChunk *out)
+void read(uint64_t cursor, AMDHVLogChunk *out)
 {
     bzero(out, sizeof(*out));
     if (!gLock)
@@ -142,24 +142,24 @@ void read(uint64_t cursor, RHVLogChunk *out)
 
     /* Same rule as ringAppend: never take the ring lock a second time on the CPU that already holds it. */
     int cpu = cpu_number();
-    if (cpu >= 0 && cpu < RHV_MAX_CPUS && OSIncrementAtomic(&gLogInFlight[cpu]) != 0) {
+    if (cpu >= 0 && cpu < AMDHV_MAX_CPUS && OSIncrementAtomic(&gLogInFlight[cpu]) != 0) {
         OSDecrementAtomic(&gLogInFlight[cpu]);
         OSIncrementAtomic64((volatile SInt64 *)&gStats.logReentries);
-        out->length = rhv_ring_read(&gRing, cursor, out->data, RHV_LOG_CHUNK_DATA, &out->nextCursor,
+        out->length = amdhv_ring_read(&gRing, cursor, out->data, AMDHV_LOG_CHUNK_DATA, &out->nextCursor,
                                     &out->dropped);
         return;
     }
     IOInterruptState st = IOSimpleLockLockDisableInterrupt(gLock);
-    out->length = rhv_ring_read(&gRing, cursor, out->data, RHV_LOG_CHUNK_DATA, &out->nextCursor,
+    out->length = amdhv_ring_read(&gRing, cursor, out->data, AMDHV_LOG_CHUNK_DATA, &out->nextCursor,
                                 &out->dropped);
     IOSimpleLockUnlockEnableInterrupt(gLock, st);
-    if (cpu >= 0 && cpu < RHV_MAX_CPUS)
+    if (cpu >= 0 && cpu < AMDHV_MAX_CPUS)
         OSDecrementAtomic(&gLogInFlight[cpu]);
 }
 
 void setLevel(uint32_t level)
 {
-    if (level <= RHV_LOG_TRACE)
+    if (level <= AMDHV_LOG_TRACE)
         gLevel = level;
 }
 
@@ -169,4 +169,4 @@ uint32_t level()
 }
 
 } // namespace log
-} // namespace rhv
+} // namespace amdhv

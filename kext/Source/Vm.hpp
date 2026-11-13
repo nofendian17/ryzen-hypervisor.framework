@@ -1,35 +1,33 @@
 /*
  * Vm.hpp - a virtual machine: one shared part and one object per vCPU.
  *
- * com_overlorddev_RyzenHVVmShared is what all vCPUs of a VM have in common: the nested page tables (guest physical ->
- * pinned memory, built by rhv::npt::Table), the optional built-in RAM and the list of the vCPUs. com_overlorddev_RyzenHVVm
- * is one vCPU: it owns the VMCB, the host VMCB, the I/O and MSR permission bitmaps and the guest's general purpose
- * registers, and has its own lock, so vCPUs run in parallel on different host threads.
+ * com_amdhv_AMDHVVmShared is what all vCPUs of a VM have in common: the nested page tables (guest physical ->
+ * pinned memory, built by amdhv::npt::Table) and the list of the vCPUs. com_amdhv_AMDHVVm is one vCPU: it owns the
+ * VMCB, the host VMCB, the I/O and MSR permission bitmaps and the guest's general purpose registers, and has its own
+ * lock, so vCPUs run in parallel on different host threads.
  *
- * Guest memory comes from two places: the optional built-in 1 MiB at guest
- * physical 0 (kernel memory userland can map), and VmMap, which pins pages of the
- * calling process. Both end up as 4 KiB NPT entries pointing into a Backing.
+ * Guest memory is the calling process's own pages (hv_vm_map), pinned into 4 KiB NPT entries pointing into a Backing.
  *
- * A vCPU's own state is serialised by its lock: VmRun holds it while the guest runs, which is bounded by the time slice
+ * A vCPU's own state is serialised by its lock: run() holds it while the guest runs, which is bounded by the time slice
  * (see Vm.cpp). The page tables have a reader/writer lock: a vCPU holds it for reading while it is inside the guest, and
- * VmMap/VmUnmap/VmProtect take it for writing after kicking every vCPU out, so when they return no vCPU still runs with
+ * map/unmap/protect take it for writing after kicking every vCPU out, so when they return no vCPU still runs with
  * the old mappings or permissions (every VMRUN flushes the TLB).
  */
-#ifndef RYZENHV_VM_HPP
-#define RYZENHV_VM_HPP
+#ifndef AMDHV_VM_HPP
+#define AMDHV_VM_HPP
 
 #include <IOKit/IOBufferMemoryDescriptor.h>
 #include <IOKit/IOLocks.h>
 #include <libkern/c++/OSObject.h>
 
-#include "../../include/RyzenHVShared.h"
+#include "../../include/AMDHVShared.h"
 #include "FpuState.hpp"
 #include "Npt.hpp"
 #include "VmcsState.hpp"
 #include "PhysMem.hpp"
 #include "VMCB.hpp"
 
-namespace rhv {
+namespace amdhv {
 
 /* Guest GPRs that VMRUN does not keep in the VMCB (RAX and RSP are in the VMCB). Layout is used by SvmRun.S. */
 struct GuestGprs {
@@ -37,39 +35,35 @@ struct GuestGprs {
     uint64_t r8, r9, r10, r11, r12, r13, r14, r15;
 };
 
-} // namespace rhv
+} // namespace amdhv
 
 
-class com_overlorddev_RyzenHVVm;
+class com_amdhv_AMDHVVm;
 
-class com_overlorddev_RyzenHVVmShared : public OSObject {
-    OSDeclareDefaultStructors(com_overlorddev_RyzenHVVmShared)
+class com_amdhv_AMDHVVmShared : public OSObject {
+    OSDeclareDefaultStructors(com_amdhv_AMDHVVmShared)
 
 public:
-    /* flags: RHV_VMCREATE_*. `owner` is the task that created it (a vCPU may only join from the same task). */
-    static com_overlorddev_RyzenHVVmShared *create(uint32_t flags, task_t owner, IOReturn *err);
+    /* `owner` is the task that created it (a vCPU may only join from the same task). */
+    static com_amdhv_AMDHVVmShared *create(task_t owner, IOReturn *err);
     /* Looks a VM up by id; takes a reference, nullptr when there is none or it belongs to another task. */
-    static com_overlorddev_RyzenHVVmShared *find(uint64_t id, task_t owner);
+    static com_amdhv_AMDHVVmShared *find(uint64_t id, task_t owner);
 
     bool init() override;
     void free() override;
 
     uint64_t            id() const { return fId; }
-    rhv::npt::Table    &npt() { return fNpt; }
+    amdhv::npt::Table    &npt() { return fNpt; }
     IORWLock           *rw() const { return fRw; }
-    IOMemoryDescriptor *ramDescriptor() const { return fRam; }
-    uint32_t            ramSize() const { return fRam ? RHV_GUEST_RAM_SIZE : 0; }
 
-    /* hv_vm_map / unmap / protect. See RyzenHVShared.h for the exact rules. */
+    /* hv_vm_map / unmap / protect. See AMDHVShared.h for the exact rules. */
     IOReturn map(task_t task, uint64_t uva, uint64_t gpa, uint64_t size, uint32_t flags);
     IOReturn unmap(uint64_t gpa, uint64_t size);
     IOReturn protect(uint64_t gpa, uint64_t size, uint32_t flags);
-    /* Debugging (rhv-info hv readguest): reads guest physical memory through the nested page tables. Fails when a page is not mapped. */
-    IOReturn readPhys(uint64_t gpa, void *dst, size_t len);
 
     /* The vCPUs, for kicking them out of the guest. attach() fails with kIOReturnNoResources when the VM is full. */
-    IOReturn attach(com_overlorddev_RyzenHVVm *vcpu, uint32_t *index);
-    void     detach(com_overlorddev_RyzenHVVm *vcpu);
+    IOReturn attach(com_amdhv_AMDHVVm *vcpu, uint32_t *index);
+    void     detach(com_amdhv_AMDHVVm *vcpu);
     void     kickAll();
 
     /* A pinned buffer (user or kernel) and how many NPT pages still point into it. */
@@ -80,7 +74,7 @@ public:
     };
 
 private:
-    bool     setup(uint32_t flags, task_t owner);
+    bool     setup(task_t owner);
     IOReturn mapDescriptorLocked(IOMemoryDescriptor *md, uint64_t gpa, uint64_t size, uint32_t perm);
     static void dropPage(Backing *b);
     static void releaseOwner(void *ctx, void *owner);
@@ -89,14 +83,13 @@ private:
     task_t                    fOwner;
     IORWLock                 *fRw;
     IOLock                   *fRegLock;
-    com_overlorddev_RyzenHVVm *fVcpus[RHV_MAX_VCPUS_PER_VM];
-    IOBufferMemoryDescriptor *fRam;
-    rhv::npt::Table           fNpt;
+    com_amdhv_AMDHVVm *fVcpus[AMDHV_MAX_VCPUS_PER_VM];
+    amdhv::npt::Table           fNpt;
     uint64_t                  fPagesMapped;
 };
 
-class com_overlorddev_RyzenHVVm : public OSObject {
-    OSDeclareDefaultStructors(com_overlorddev_RyzenHVVm)
+class com_amdhv_AMDHVVm : public OSObject {
+    OSDeclareDefaultStructors(com_amdhv_AMDHVVm)
 
 public:
     /*
@@ -104,35 +97,28 @@ public:
      * kIOReturnUnsupported if the CPU lacks NPT or NRIPS. With `shared` null a new VM is made (this is its first vCPU),
      * otherwise the vCPU joins that VM (kIOReturnNoResources when it is full).
      */
-    static com_overlorddev_RyzenHVVm *create(const RHVInfo &info, uint32_t flags, task_t owner,
-                                             com_overlorddev_RyzenHVVmShared *shared, IOReturn *err);
+    static com_amdhv_AMDHVVm *create(const AMDHVInfo &info, task_t owner,
+                                             com_amdhv_AMDHVVmShared *shared, IOReturn *err);
 
-    com_overlorddev_RyzenHVVmShared *shared() const { return fShared; }
+    com_amdhv_AMDHVVmShared *shared() const { return fShared; }
     uint32_t                         index() const { return fIndex; }
 
     bool init() override;
     void free() override;
 
-    /* nullptr when created with RHV_VMCREATE_NO_RAM (and for a vCPU that joined). */
-    IOMemoryDescriptor *ramDescriptor() const { return fShared->ramDescriptor(); }
-    uint32_t            ramSize() const { return fShared->ramSize(); }
-
-    /* hv_vm_map / unmap / protect. See RyzenHVShared.h for the exact rules. */
+    /* hv_vm_map / unmap / protect. See AMDHVShared.h for the exact rules. */
     IOReturn map(task_t task, uint64_t uva, uint64_t gpa, uint64_t size, uint32_t flags);
     IOReturn unmap(uint64_t gpa, uint64_t size);
     IOReturn protect(uint64_t gpa, uint64_t size, uint32_t flags);
 
-    IOReturn reset(uint16_t cs, uint16_t ip);
-    IOReturn getRegs(RHVRegs *out);
-    IOReturn setRegs(const RHVRegs *in);
-    IOReturn run(bool skipInstruction, RHVExit *out);
-    IOReturn runEx(const RHVRunIn *in, RHVRunOut *out);            /* VmRunEx: apply, run, report in one call */
-    IOReturn vmcsReadMany(const RHVReadMany *in, RHVReadManyOut *out);
+    IOReturn getRegs(AMDHVRegs *out);
+    IOReturn setRegs(const AMDHVRegs *in);
+    IOReturn run(bool skipInstruction, AMDHVExit *out);
+    IOReturn runEx(const AMDHVRunIn *in, AMDHVRunOut *out);            /* apply, run, report in one call */
+    IOReturn vmcsReadMany(const AMDHVReadMany *in, AMDHVReadManyOut *out);
 
-    /* VMX mode (RHV_VMCREATE_VMX): the Hypervisor.framework view of the guest. */
-    bool     isVmx() const { return fVmx; }
+    /* The Hypervisor.framework (VMX-shaped) view of the guest. */
     IOReturn vmcsRead(uint32_t field, uint64_t *value);
-    uint8_t  debugCpl();                                          /* the CPL the VMCB holds (debugging, rhv-info hv flightdump) */
     IOReturn vmcsWrite(uint32_t field, uint64_t value);
 
     /* Guest x87/SSE/AVX state and XCR0. */
@@ -144,33 +130,32 @@ public:
      */
     void     kick();
 
-    IOReturn getFpu(RHVFpuState *out);
-    IOReturn setFpu(const RHVFpuState *in);
+    IOReturn getFpu(AMDHVFpuState *out);
+    IOReturn setFpu(const AMDHVFpuState *in);
 
 private:
-    bool     setup(uint32_t flags);
+    bool     setup();
     void     resetLocked(uint16_t cs, uint16_t ip);
     void     dumpVmcb(const char *why);
 
     IOLock                   *fLock;
-    com_overlorddev_RyzenHVVmShared *fShared;
+    com_amdhv_AMDHVVmShared *fShared;
     uint32_t                  fIndex;
-    rhv::PhysMem              fVmcb;
-    rhv::PhysMem              fHostVmcb;
-    rhv::PhysMem              fIopm;     /* 12 KiB, all ones: intercept every port */
-    rhv::PhysMem              fMsrpm;    /*  8 KiB, all ones: intercept every MSR  */
-    rhv::vmx::VmcsState       fVmcs;
-    rhv::PhysMem              fHostFpu, fGuestFpu, fScratchFpu;   /* XSAVE areas, 4 KiB aligned */
+    amdhv::PhysMem              fVmcb;
+    amdhv::PhysMem              fHostVmcb;
+    amdhv::PhysMem              fIopm;     /* 12 KiB, all ones: intercept every port */
+    amdhv::PhysMem              fMsrpm;    /*  8 KiB, all ones: intercept every MSR  */
+    amdhv::vmx::VmcsState       fVmcs;
+    amdhv::PhysMem              fHostFpu, fGuestFpu, fScratchFpu;   /* XSAVE areas, 4 KiB aligned */
     uint64_t                  fGuestXcr0;
     uint64_t                  fXcr0Supported;    /* CPUID.0xD.0 EDX:EAX */
     bool                      fHasTscAux;        /* the CPU has RDTSCP, so IA32_TSC_AUX */
     uint32_t                  fFpuSize;
     volatile uint32_t         fKick;
     volatile int              fRunCpu;           /* CPU inside VMRUN, -1 when none; for kick() */
-    bool                      fVmx;
-    rhv::GuestGprs            fGprs;
+    amdhv::GuestGprs            fGprs;
     bool                      fFirstRun;
     bool                      fHaveNextRip;
 };
 
-#endif /* RYZENHV_VM_HPP */
+#endif /* AMDHV_VM_HPP */

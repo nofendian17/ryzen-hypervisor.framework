@@ -9,11 +9,11 @@
 
 #define super OSObject
 
-OSDefineMetaClassAndStructors(com_overlorddev_RyzenHVVm, OSObject)
-OSDefineMetaClassAndStructors(com_overlorddev_RyzenHVVmShared, OSObject)
+OSDefineMetaClassAndStructors(com_amdhv_AMDHVVm, OSObject)
+OSDefineMetaClassAndStructors(com_amdhv_AMDHVVmShared, OSObject)
 
-using namespace rhv;
-using namespace rhv::vmcb;
+using namespace amdhv;
+using namespace amdhv::vmcb;
 
 /* SvmRun.S addresses these by hand. */
 static_assert(offsetof(GuestGprs, rbx) == 0, "GuestGprs layout");
@@ -32,19 +32,18 @@ const uint64_t kTimesliceNs = 10ull * 1000 * 1000;   /* return to userland at le
 
 const uint64_t kGuestPat = 0x0007040600070406ull;   /* power-on default PAT */
 
-static_assert(RHV_GUEST_RAM_SIZE % 4096 == 0, "guest RAM must be page sized");
-static_assert((int)RHV_MEM_READ == (int)rhv::npt::PERM_R && (int)RHV_MEM_WRITE == (int)rhv::npt::PERM_W &&
-                  (int)RHV_MEM_EXEC == (int)rhv::npt::PERM_X,
-              "RHV_MEM_* must match the NPT permission bits");
+static_assert((int)AMDHV_MEM_READ == (int)amdhv::npt::PERM_R && (int)AMDHV_MEM_WRITE == (int)amdhv::npt::PERM_W &&
+                  (int)AMDHV_MEM_EXEC == (int)amdhv::npt::PERM_X,
+              "AMDHV_MEM_* must match the NPT permission bits");
 
 /* Table pages are wired physically contiguous kernel pages. Node bookkeeping is plain kernel heap. */
-bool nptAllocPage(void *, rhv::npt::Page *out)
+bool nptAllocPage(void *, amdhv::npt::Page *out)
 {
-    rhv::PhysMem *m = (rhv::PhysMem *)IOMalloc(sizeof(rhv::PhysMem));
+    amdhv::PhysMem *m = (amdhv::PhysMem *)IOMalloc(sizeof(amdhv::PhysMem));
     if (!m)
         return false;
-    if (!rhv::physAlloc(m, 4096)) {
-        IOFree(m, sizeof(rhv::PhysMem));
+    if (!amdhv::physAlloc(m, 4096)) {
+        IOFree(m, sizeof(amdhv::PhysMem));
         return false;
     }
     out->va     = m->va;
@@ -53,11 +52,11 @@ bool nptAllocPage(void *, rhv::npt::Page *out)
     return true;
 }
 
-void nptFreePage(void *, const rhv::npt::Page *p)
+void nptFreePage(void *, const amdhv::npt::Page *p)
 {
-    rhv::PhysMem *m = (rhv::PhysMem *)p->handle;
-    rhv::physFree(m);
-    IOFree(m, sizeof(rhv::PhysMem));
+    amdhv::PhysMem *m = (amdhv::PhysMem *)p->handle;
+    amdhv::physFree(m);
+    IOFree(m, sizeof(amdhv::PhysMem));
 }
 
 void *nptAllocMem(void *, size_t n)
@@ -73,7 +72,7 @@ void nptFreeMem(void *, void *p, size_t n)
     IOFree(p, n);
 }
 
-const rhv::npt::Allocator kNptAllocator = { nullptr, nptAllocPage, nptFreePage, nptAllocMem,
+const amdhv::npt::Allocator kNptAllocator = { nullptr, nptAllocPage, nptFreePage, nptAllocMem,
                                             nptFreeMem };
 
 void setSeg(Seg &s, uint16_t selector, uint64_t base, uint32_t limit, uint16_t attrib)
@@ -90,7 +89,7 @@ void setSeg(Seg &s, uint16_t selector, uint64_t base, uint32_t limit, uint16_t a
 
 namespace {
 IOLock *gSharedLock;                       /* guards the registry below */
-com_overlorddev_RyzenHVVmShared *gShared[16];
+com_amdhv_AMDHVVmShared *gShared[16];
 uint64_t gNextId = 1;
 
 IOLock *sharedLock()
@@ -104,19 +103,19 @@ IOLock *sharedLock()
 }
 } // namespace
 
-com_overlorddev_RyzenHVVmShared *com_overlorddev_RyzenHVVmShared::create(uint32_t flags, task_t owner, IOReturn *err)
+com_amdhv_AMDHVVmShared *com_amdhv_AMDHVVmShared::create(task_t owner, IOReturn *err)
 {
     IOLock *reg = sharedLock();
     if (!reg) {
         *err = kIOReturnNoMemory;
         return nullptr;
     }
-    com_overlorddev_RyzenHVVmShared *sh = OSTypeAlloc(com_overlorddev_RyzenHVVmShared);
+    com_amdhv_AMDHVVmShared *sh = OSTypeAlloc(com_amdhv_AMDHVVmShared);
     if (!sh) {
         *err = kIOReturnNoMemory;
         return nullptr;
     }
-    if (!sh->init() || !sh->setup(flags, owner)) {
+    if (!sh->init() || !sh->setup(owner)) {
         sh->release();
         *err = kIOReturnNoMemory;
         return nullptr;
@@ -135,7 +134,7 @@ com_overlorddev_RyzenHVVmShared *com_overlorddev_RyzenHVVmShared::create(uint32_
     }
     IOLockUnlock(reg);
     if (slot < 0) {
-        RHV_WARN("VmCreate: too many VMs");
+        AMDHV_WARN("VmCreate: too many VMs");
         sh->release();
         *err = kIOReturnNoResources;
         return nullptr;
@@ -144,12 +143,12 @@ com_overlorddev_RyzenHVVmShared *com_overlorddev_RyzenHVVmShared::create(uint32_
     return sh;
 }
 
-com_overlorddev_RyzenHVVmShared *com_overlorddev_RyzenHVVmShared::find(uint64_t id, task_t owner)
+com_amdhv_AMDHVVmShared *com_amdhv_AMDHVVmShared::find(uint64_t id, task_t owner)
 {
     IOLock *reg = sharedLock();
     if (!reg)
         return nullptr;
-    com_overlorddev_RyzenHVVmShared *found = nullptr;
+    com_amdhv_AMDHVVmShared *found = nullptr;
     IOLockLock(reg);
     for (unsigned i = 0; i < sizeof(gShared) / sizeof(gShared[0]); i++) {
         if (gShared[i] && gShared[i]->fId == id && gShared[i]->fOwner == owner) {
@@ -162,7 +161,7 @@ com_overlorddev_RyzenHVVmShared *com_overlorddev_RyzenHVVmShared::find(uint64_t 
     return found;
 }
 
-bool com_overlorddev_RyzenHVVmShared::init()
+bool com_amdhv_AMDHVVmShared::init()
 {
     if (!OSObject::init())
         return false;
@@ -171,14 +170,13 @@ bool com_overlorddev_RyzenHVVmShared::init()
     fRw = nullptr;
     fRegLock = nullptr;
     bzero(fVcpus, sizeof(fVcpus));
-    fRam = nullptr;
     fPagesMapped = 0;
     fRw = IORWLockAlloc();
     fRegLock = IOLockAlloc();
     return fRw && fRegLock;
 }
 
-void com_overlorddev_RyzenHVVmShared::free()
+void com_amdhv_AMDHVVmShared::free()
 {
     IOLock *reg = gSharedLock;
     if (reg) {
@@ -190,10 +188,6 @@ void com_overlorddev_RyzenHVVmShared::free()
     }
     /* Unpins every buffer that is still mapped, then returns the tables. */
     fNpt.shutdown(&releaseOwner, this);
-    if (fRam) {
-        fRam->release();
-        fRam = nullptr;
-    }
     if (fRw) {
         IORWLockFree(fRw);
         fRw = nullptr;
@@ -205,35 +199,17 @@ void com_overlorddev_RyzenHVVmShared::free()
     OSObject::free();
 }
 
-bool com_overlorddev_RyzenHVVmShared::setup(uint32_t flags, task_t owner)
+bool com_amdhv_AMDHVVmShared::setup(task_t owner)
 {
     fOwner = owner;
-    if (!fNpt.init(kNptAllocator))
-        return false;
-    if (!(flags & RHV_VMCREATE_NO_RAM)) {
-        /* Not contiguous on purpose: the NPT maps it page by page. kIOMemoryKernelUserShared lets userland map it. */
-        fRam = IOBufferMemoryDescriptor::inTaskWithOptions(
-            kernel_task, kIODirectionInOut | kIOMemoryKernelUserShared, RHV_GUEST_RAM_SIZE, 4096);
-        if (!fRam) {
-            RHV_ERR("VM: cannot allocate %u bytes of guest RAM", RHV_GUEST_RAM_SIZE);
-            return false;
-        }
-        bzero(fRam->getBytesNoCopy(), RHV_GUEST_RAM_SIZE);
-
-        IOReturn rc = mapDescriptorLocked(fRam, 0, RHV_GUEST_RAM_SIZE, rhv::npt::PERM_MASK);
-        if (rc != kIOReturnSuccess) {
-            RHV_ERR("VM: cannot map the built-in RAM: 0x%x", rc);
-            return false;
-        }
-    }
-    return true;
+    return fNpt.init(kNptAllocator);
 }
 
-IOReturn com_overlorddev_RyzenHVVmShared::attach(com_overlorddev_RyzenHVVm *vcpu, uint32_t *index)
+IOReturn com_amdhv_AMDHVVmShared::attach(com_amdhv_AMDHVVm *vcpu, uint32_t *index)
 {
     IOReturn rc = kIOReturnNoResources;
     IOLockLock(fRegLock);
-    for (uint32_t i = 0; i < RHV_MAX_VCPUS_PER_VM; i++) {
+    for (uint32_t i = 0; i < AMDHV_MAX_VCPUS_PER_VM; i++) {
         if (!fVcpus[i]) {
             fVcpus[i] = vcpu;
             *index = i;
@@ -245,27 +221,27 @@ IOReturn com_overlorddev_RyzenHVVmShared::attach(com_overlorddev_RyzenHVVm *vcpu
     return rc;
 }
 
-void com_overlorddev_RyzenHVVmShared::detach(com_overlorddev_RyzenHVVm *vcpu)
+void com_amdhv_AMDHVVmShared::detach(com_amdhv_AMDHVVm *vcpu)
 {
     IOLockLock(fRegLock);
-    for (uint32_t i = 0; i < RHV_MAX_VCPUS_PER_VM; i++)
+    for (uint32_t i = 0; i < AMDHV_MAX_VCPUS_PER_VM; i++)
         if (fVcpus[i] == vcpu)
             fVcpus[i] = nullptr;
     IOLockUnlock(fRegLock);
 }
 
 /* Sends every vCPU that is inside the guest back to userland now, so a writer of the page tables need not wait a slice. */
-void com_overlorddev_RyzenHVVmShared::kickAll()
+void com_amdhv_AMDHVVmShared::kickAll()
 {
     IOLockLock(fRegLock);
-    for (uint32_t i = 0; i < RHV_MAX_VCPUS_PER_VM; i++)
+    for (uint32_t i = 0; i < AMDHV_MAX_VCPUS_PER_VM; i++)
         if (fVcpus[i])
             fVcpus[i]->kick();
     IOLockUnlock(fRegLock);
 }
 
 /* Called for every page that stops pointing into `b`. The last one unpins and frees it. */
-void com_overlorddev_RyzenHVVmShared::dropPage(Backing *b)
+void com_amdhv_AMDHVVmShared::dropPage(Backing *b)
 {
     if (--b->live != 0)
         return;
@@ -275,22 +251,22 @@ void com_overlorddev_RyzenHVVmShared::dropPage(Backing *b)
 }
 
 /* Table::clear/shutdown callback: one call per page that is still mapped. */
-void com_overlorddev_RyzenHVVmShared::releaseOwner(void *ctx, void *owner)
+void com_amdhv_AMDHVVmShared::releaseOwner(void *ctx, void *owner)
 {
-    com_overlorddev_RyzenHVVmShared *vm = static_cast<com_overlorddev_RyzenHVVmShared *>(ctx);
+    com_amdhv_AMDHVVmShared *vm = static_cast<com_amdhv_AMDHVVmShared *>(ctx);
     vm->fPagesMapped--;
-    RHV_STAT_ADD(vmPagesMapped, -1);
+    AMDHV_STAT_ADD(vmPagesMapped, -1);
     dropPage(static_cast<Backing *>(owner));
 }
 
-/* Where byte `offset` of `ctx` (an IOMemoryDescriptor) lives in physical memory, see rhv::npt::SegmentFn. */
+/* Where byte `offset` of `ctx` (an IOMemoryDescriptor) lives in physical memory, see amdhv::npt::SegmentFn. */
 static bool mdSegment(void *ctx, uint64_t offset, uint64_t *pa, uint64_t *len)
 {
     IOMemoryDescriptor *md = static_cast<IOMemoryDescriptor *>(ctx);
     IOByteCount seg = 0;
     addr64_t addr = md->getPhysicalSegment(offset, &seg, kIOMemoryMapperNone);
     if (!addr || !seg) {
-        RHV_ERR("VM map: no physical segment at offset 0x%llx", (unsigned long long)offset);
+        AMDHV_ERR("VM map: no physical segment at offset 0x%llx", (unsigned long long)offset);
         return false;
     }
     *pa  = addr;
@@ -303,12 +279,12 @@ static bool mdSegment(void *ctx, uint64_t offset, uint64_t *pa, uint64_t *len)
  * Wires `md` (prepare) and holds a reference on it until the last page is unmapped.
  * Caller holds the lock or is still constructing the VM.
  */
-IOReturn com_overlorddev_RyzenHVVmShared::mapDescriptorLocked(IOMemoryDescriptor *md, uint64_t gpa,
+IOReturn com_amdhv_AMDHVVmShared::mapDescriptorLocked(IOMemoryDescriptor *md, uint64_t gpa,
                                                         uint64_t size, uint32_t perm)
 {
     for (uint64_t off = 0; off < size; off += 4096) {
         if (fNpt.isMapped(gpa + off)) {
-            RHV_DBG("VM map: guest page 0x%llx is already mapped", (unsigned long long)(gpa + off));
+            AMDHV_DBG("VM map: guest page 0x%llx is already mapped", (unsigned long long)(gpa + off));
             return kIOReturnBusy;
         }
     }
@@ -323,13 +299,13 @@ IOReturn com_overlorddev_RyzenHVVmShared::mapDescriptorLocked(IOMemoryDescriptor
         dir = kIODirectionOut;
         rc  = md->prepare(dir);
         if (rc == kIOReturnSuccess) {
-            RHV_WARN("VM map: gpa 0x%llx cannot be pinned for writing (0x%x), mapped read-only (requested perm %u)",
+            AMDHV_WARN("VM map: gpa 0x%llx cannot be pinned for writing (0x%x), mapped read-only (requested perm %u)",
                      (unsigned long long)gpa, first, perm);
-            perm &= ~(uint32_t)rhv::npt::PERM_W;
+            perm &= ~(uint32_t)amdhv::npt::PERM_W;
         }
     }
     if (rc != kIOReturnSuccess) {
-        RHV_WARN("VM map: cannot pin the buffer: 0x%x (perm %u)", rc, perm);
+        AMDHV_WARN("VM map: cannot pin the buffer: 0x%x (perm %u)", rc, perm);
         return rc;
     }
     Backing *b = (Backing *)IOMalloc(sizeof(Backing));
@@ -343,20 +319,20 @@ IOReturn com_overlorddev_RyzenHVVmShared::mapDescriptorLocked(IOMemoryDescriptor
     b->dir  = dir;
 
     uint64_t done = 0;    /* bytes of the range that are mapped so far */
-    rhv::npt::Status st = fNpt.mapRange(gpa, size, perm, b, &mdSegment, md, &done);
-    if (st != rhv::npt::OK) {
-        RHV_ERR("VM map: NPT mapRange failed (status %d) after %llu of %llu bytes at gpa 0x%llx", (int)st,
+    amdhv::npt::Status st = fNpt.mapRange(gpa, size, perm, b, &mdSegment, md, &done);
+    if (st != amdhv::npt::OK) {
+        AMDHV_ERR("VM map: NPT mapRange failed (status %d) after %llu of %llu bytes at gpa 0x%llx", (int)st,
                 (unsigned long long)done, (unsigned long long)size, (unsigned long long)gpa);
         switch (st) {
-        case rhv::npt::NO_MEMORY:   rc = kIOReturnNoMemory; break;
-        case rhv::npt::BUSY:        rc = kIOReturnBusy; break;
-        case rhv::npt::BAD_SEGMENT: rc = kIOReturnVMError; break;
+        case amdhv::npt::NO_MEMORY:   rc = kIOReturnNoMemory; break;
+        case amdhv::npt::BUSY:        rc = kIOReturnBusy; break;
+        case amdhv::npt::BAD_SEGMENT: rc = kIOReturnVMError; break;
         default:                    rc = kIOReturnBadArgument; break;
         }
     }
     /* Count what was actually mapped. */
     fPagesMapped += done / 4096;
-    RHV_STAT_ADD(vmPagesMapped, done / 4096);
+    AMDHV_STAT_ADD(vmPagesMapped, done / 4096);
     b->live += done / 4096;
 
     if (rc != kIOReturnSuccess) {
@@ -365,7 +341,7 @@ IOReturn com_overlorddev_RyzenHVVmShared::mapDescriptorLocked(IOMemoryDescriptor
             void *owner = fNpt.unmap(gpa + q);
             if (owner) {
                 fPagesMapped--;
-                RHV_STAT_ADD(vmPagesMapped, -1);
+                AMDHV_STAT_ADD(vmPagesMapped, -1);
                 dropPage(static_cast<Backing *>(owner));
             }
         }
@@ -374,13 +350,13 @@ IOReturn com_overlorddev_RyzenHVVmShared::mapDescriptorLocked(IOMemoryDescriptor
     return rc;
 }
 
-IOReturn com_overlorddev_RyzenHVVmShared::map(task_t task, uint64_t uva, uint64_t gpa, uint64_t size,
+IOReturn com_amdhv_AMDHVVmShared::map(task_t task, uint64_t uva, uint64_t gpa, uint64_t size,
                                         uint32_t flags)
 {
     uint32_t perm = flags;
-    if (!rhv::npt::normalizePerm(&perm) || size == 0 || size > RHV_MAP_MAX_SIZE ||
-        ((uva | gpa | size) & 0xFFF) || gpa >= rhv::npt::kGpaLimit ||
-        size > rhv::npt::kGpaLimit - gpa || uva + size < uva)
+    if (!amdhv::npt::normalizePerm(&perm) || size == 0 || size > AMDHV_MAP_MAX_SIZE ||
+        ((uva | gpa | size) & 0xFFF) || gpa >= amdhv::npt::kGpaLimit ||
+        size > amdhv::npt::kGpaLimit - gpa || uva + size < uva)
         return kIOReturnBadArgument;
 
     IOMemoryDescriptor *md = IOMemoryDescriptor::withAddressRange(uva, size, kIODirectionInOut, task);
@@ -394,51 +370,21 @@ IOReturn com_overlorddev_RyzenHVVmShared::map(task_t task, uint64_t uva, uint64_
 
     md->release();                 /* the backing took its own reference */
     if (rc == kIOReturnSuccess) {
-        RHV_STAT_INC(vmMaps);
-        RHV_DBG("VM map: uva 0x%llx -> gpa 0x%llx, %llu KiB, perm %u", (unsigned long long)uva,
+        AMDHV_STAT_INC(vmMaps);
+        AMDHV_DBG("VM map: uva 0x%llx -> gpa 0x%llx, %llu KiB, perm %u", (unsigned long long)uva,
                 (unsigned long long)gpa, (unsigned long long)(size / 1024), perm);
     } else {
-        RHV_STAT_INC(vmMapFailures);
-        RHV_WARN("VM map failed (0x%x): uva 0x%llx gpa 0x%llx size 0x%llx", rc,
+        AMDHV_STAT_INC(vmMapFailures);
+        AMDHV_WARN("VM map failed (0x%x): uva 0x%llx gpa 0x%llx size 0x%llx", rc,
                  (unsigned long long)uva, (unsigned long long)gpa, (unsigned long long)size);
     }
     return rc;
 }
 
-IOReturn com_overlorddev_RyzenHVVmShared::readPhys(uint64_t gpa, void *dst, size_t len)
+IOReturn com_amdhv_AMDHVVmShared::unmap(uint64_t gpa, uint64_t size)
 {
-    uint8_t *out = (uint8_t *)dst;
-    IORWLockRead(fRw);                     /* a map/unmap waits; the pages are pinned while they are mapped */
-    IOReturn rc = kIOReturnSuccess;
-    while (len) {
-        const size_t inPage = 4096 - (size_t)(gpa & 0xFFF);
-        const size_t n = len < inPage ? len : inPage;
-        uint64_t hpa = 0;
-        if (!fNpt.lookup(gpa & ~(uint64_t)0xFFF, &hpa, nullptr)) {
-            rc = kIOReturnNotFound;
-            break;
-        }
-        IOMemoryDescriptor *md = IOMemoryDescriptor::withAddressRange(hpa + (gpa & 0xFFF), n, kIODirectionIn | kIOMemoryTypePhysical64, nullptr);
-        if (!md) {
-            rc = kIOReturnNoMemory;
-            break;
-        }
-        const IOByteCount got = md->readBytes(0, out, n);
-        md->release();
-        if (got != n) {
-            rc = kIOReturnIOError;
-            break;
-        }
-        out += n; gpa += n; len -= n;
-    }
-    IORWLockUnlock(fRw);
-    return rc;
-}
-
-IOReturn com_overlorddev_RyzenHVVmShared::unmap(uint64_t gpa, uint64_t size)
-{
-    if (size == 0 || ((gpa | size) & 0xFFF) || gpa >= rhv::npt::kGpaLimit ||
-        size > rhv::npt::kGpaLimit - gpa)
+    if (size == 0 || ((gpa | size) & 0xFFF) || gpa >= amdhv::npt::kGpaLimit ||
+        size > amdhv::npt::kGpaLimit - gpa)
         return kIOReturnBadArgument;
 
     kickAll();
@@ -447,21 +393,21 @@ IOReturn com_overlorddev_RyzenHVVmShared::unmap(uint64_t gpa, uint64_t size)
         void *owner = fNpt.unmap(gpa + off);
         if (owner) {
             fPagesMapped--;
-            RHV_STAT_ADD(vmPagesMapped, -1);
+            AMDHV_STAT_ADD(vmPagesMapped, -1);
             dropPage(static_cast<Backing *>(owner));
         }
     }
     IORWLockUnlock(fRw);   /* the TLB is flushed on every VMRUN, see run() */
 
-    RHV_STAT_INC(vmUnmaps);
+    AMDHV_STAT_INC(vmUnmaps);
     return kIOReturnSuccess;
 }
 
-IOReturn com_overlorddev_RyzenHVVmShared::protect(uint64_t gpa, uint64_t size, uint32_t flags)
+IOReturn com_amdhv_AMDHVVmShared::protect(uint64_t gpa, uint64_t size, uint32_t flags)
 {
     uint32_t perm = flags;
-    if (!rhv::npt::normalizePerm(&perm) || size == 0 || ((gpa | size) & 0xFFF) ||
-        gpa >= rhv::npt::kGpaLimit || size > rhv::npt::kGpaLimit - gpa)
+    if (!amdhv::npt::normalizePerm(&perm) || size == 0 || ((gpa | size) & 0xFFF) ||
+        gpa >= amdhv::npt::kGpaLimit || size > amdhv::npt::kGpaLimit - gpa)
         return kIOReturnBadArgument;
 
     kickAll();
@@ -476,7 +422,7 @@ IOReturn com_overlorddev_RyzenHVVmShared::protect(uint64_t gpa, uint64_t size, u
     if (rc == kIOReturnSuccess) {
         for (uint64_t off = 0; off < size; off += 4096)
             fNpt.protect(gpa + off, perm);
-        RHV_STAT_INC(vmProtects);
+        AMDHV_STAT_INC(vmProtects);
     }
     IORWLockUnlock(fRw);
     return rc;
@@ -485,41 +431,36 @@ IOReturn com_overlorddev_RyzenHVVmShared::protect(uint64_t gpa, uint64_t size, u
 
 /* ---- one vCPU ---- */
 
-com_overlorddev_RyzenHVVm *com_overlorddev_RyzenHVVm::create(const RHVInfo &info, uint32_t flags, task_t owner,
-                                                             com_overlorddev_RyzenHVVmShared *shared, IOReturn *err)
+com_amdhv_AMDHVVm *com_amdhv_AMDHVVm::create(const AMDHVInfo &info, task_t owner,
+                                                             com_amdhv_AMDHVVmShared *shared, IOReturn *err)
 {
-    if (flags & ~(uint32_t)(RHV_VMCREATE_NO_RAM | RHV_VMCREATE_VMX)) {
-        *err = kIOReturnBadArgument;
-        return nullptr;
-    }
-
     if (info.nCpusSvmActive == 0 || info.nCpusSvmActive != info.nCpusSvmUsable) {
-        RHV_WARN("VmCreate: SVM is not active on all CPUs (%u of %u), boot with rhv_enable_svm=1",
+        AMDHV_WARN("VmCreate: SVM is not active on all CPUs (%u of %u), boot with amdhv_enable_svm=1",
                  info.nCpusSvmActive, info.nCpusSvmUsable);
         *err = kIOReturnNotReady;
         return nullptr;
     }
-    if (!(info.svmFeatures & RHV_SVM_FEAT_NP) || !(info.svmFeatures & RHV_SVM_FEAT_NRIPS)) {
-        RHV_ERR("VmCreate: CPU needs NPT and NRIPS (features=0x%x)", info.svmFeatures);
+    if (!(info.svmFeatures & AMDHV_SVM_FEAT_NP) || !(info.svmFeatures & AMDHV_SVM_FEAT_NRIPS)) {
+        AMDHV_ERR("VmCreate: CPU needs NPT and NRIPS (features=0x%x)", info.svmFeatures);
         *err = kIOReturnUnsupported;
         return nullptr;
     }
     if (info.numAsids < 2) {
         /* ASID 0 is the host's; the guest uses 1. */
-        RHV_ERR("VmCreate: CPU offers %u ASIDs, need at least 2", info.numAsids);
+        AMDHV_ERR("VmCreate: CPU offers %u ASIDs, need at least 2", info.numAsids);
         *err = kIOReturnUnsupported;
         return nullptr;
     }
 
-    com_overlorddev_RyzenHVVmShared *sh = shared;
+    com_amdhv_AMDHVVmShared *sh = shared;
     if (sh)
         sh->retain();
     else
-        sh = com_overlorddev_RyzenHVVmShared::create(flags, owner, err);
+        sh = com_amdhv_AMDHVVmShared::create(owner, err);
     if (!sh)
         return nullptr;
 
-    com_overlorddev_RyzenHVVm *vm = OSTypeAlloc(com_overlorddev_RyzenHVVm);
+    com_amdhv_AMDHVVm *vm = OSTypeAlloc(com_amdhv_AMDHVVm);
     if (!vm) {
         sh->release();
         *err = kIOReturnNoMemory;
@@ -533,41 +474,40 @@ com_overlorddev_RyzenHVVm *com_overlorddev_RyzenHVVm::create(const RHVInfo &info
     }
     IOReturn arc = sh->attach(vm, &vm->fIndex);
     if (arc != kIOReturnSuccess) {
-        RHV_WARN("VmCreate: VM %llu has no room for another vCPU", (unsigned long long)sh->id());
+        AMDHV_WARN("VmCreate: VM %llu has no room for another vCPU", (unsigned long long)sh->id());
         vm->release();
         *err = arc;
         return nullptr;
     }
-    if (!vm->setup(flags)) {
+    if (!vm->setup()) {
         vm->release();
         *err = kIOReturnNoMemory;
         return nullptr;
     }
 
-    RHV_STAT_INC(vmCreates);
+    AMDHV_STAT_INC(vmCreates);
     *err = kIOReturnSuccess;
     return vm;
 }
 
-bool com_overlorddev_RyzenHVVm::init()
+bool com_amdhv_AMDHVVm::init()
 {
     if (!super::init())
         return false;
 
     /* free() must be safe after any partial failure in setup(), so do not rely on zeroed allocations. */
-    com_overlorddev_RyzenHVVmShared *keep = fShared;       /* set by create() before init() */
+    com_amdhv_AMDHVVmShared *keep = fShared;       /* set by create() before init() */
     bzero(&fVmcb, sizeof(fVmcb));
     bzero(&fHostVmcb, sizeof(fHostVmcb));
     bzero(&fIopm, sizeof(fIopm));
     bzero(&fMsrpm, sizeof(fMsrpm));
     fShared      = keep;
     fIndex       = ~0u;
-    fVmx         = false;
     bzero(&fGprs, sizeof(fGprs));
     bzero(&fHostFpu, sizeof(fHostFpu));
     bzero(&fGuestFpu, sizeof(fGuestFpu));
     bzero(&fScratchFpu, sizeof(fScratchFpu));
-    fGuestXcr0     = rhv::fpu::XCR0_X87;
+    fGuestXcr0     = amdhv::fpu::XCR0_X87;
     fXcr0Supported = 0;
     fFpuSize       = 0;
     fKick          = 0;
@@ -580,7 +520,7 @@ bool com_overlorddev_RyzenHVVm::init()
     return fLock != nullptr;
 }
 
-void com_overlorddev_RyzenHVVm::free()
+void com_amdhv_AMDHVVm::free()
 {
     if (fShared) {
         if (fIndex != ~0u)
@@ -604,7 +544,7 @@ void com_overlorddev_RyzenHVVm::free()
     super::free();
 }
 
-bool com_overlorddev_RyzenHVVm::setup(uint32_t flags)
+bool com_amdhv_AMDHVVm::setup()
 {
     if (!physAlloc(&fVmcb, 4096) || !physAlloc(&fHostVmcb, 4096) || !physAlloc(&fIopm, 12288) ||
         !physAlloc(&fMsrpm, 8192))
@@ -612,28 +552,27 @@ bool com_overlorddev_RyzenHVVm::setup(uint32_t flags)
 
     {
         uint32_t r[4];
-        rhv_cpuid(0x80000001u, 0, r);
+        amdhv_cpuid(0x80000001u, 0, r);
         fHasTscAux = (r[3] >> 27) & 1;           /* RDTSCP */
     }
 
     /* Extended state areas. The size is what XSAVE needs for the XCR0 this thread has now. */
     {
         uint32_t r[4];
-        rhv_cpuid(0xD, 0, r);
+        amdhv_cpuid(0xD, 0, r);
         fXcr0Supported = ((uint64_t)r[3] << 32) | r[0];
         fFpuSize       = r[1];
-        if (fFpuSize < rhv::fpu::kHeaderEnd || fFpuSize > RHV_FPU_AREA_MAX) {
-            RHV_ERR("VM: XSAVE area of %u bytes is not supported (limit %u)", fFpuSize, RHV_FPU_AREA_MAX);
+        if (fFpuSize < amdhv::fpu::kHeaderEnd || fFpuSize > AMDHV_FPU_AREA_MAX) {
+            AMDHV_ERR("VM: XSAVE area of %u bytes is not supported (limit %u)", fFpuSize, AMDHV_FPU_AREA_MAX);
             return false;
         }
         if (!physAlloc(&fHostFpu, 4096) || !physAlloc(&fGuestFpu, 4096) || !physAlloc(&fScratchFpu, 4096))
             return false;
-        rhv::fpu::initArea((uint8_t *)fGuestFpu.va, 4096);
-        fGuestXcr0 = rhv::fpu::XCR0_X87;
+        amdhv::fpu::initArea((uint8_t *)fGuestFpu.va, 4096);
+        fGuestXcr0 = amdhv::fpu::XCR0_X87;
     }
 
-    fVmx = (flags & RHV_VMCREATE_VMX) != 0;
-    fVmcs.attach((rhv::vmcb::Vmcb *)fVmcb.va);
+    fVmcs.attach((amdhv::vmcb::Vmcb *)fVmcb.va);
 
     /* Intercept every I/O port and every MSR: userland decides what the guest may touch. */
     memset(fIopm.va, 0xFF, fIopm.size);
@@ -641,29 +580,29 @@ bool com_overlorddev_RyzenHVVm::setup(uint32_t flags)
 
     fFirstRun = true;
     resetLocked(0, 0);
-    RHV_INFO("vCPU %u of VM %llu created: %u KiB built-in RAM, vmcb pa 0x%llx, npt root pa 0x%llx", fIndex,
-             (unsigned long long)fShared->id(), ramSize() / 1024, (unsigned long long)fVmcb.pa,
+    AMDHV_INFO("vCPU %u of VM %llu created: vmcb pa 0x%llx, npt root pa 0x%llx", fIndex,
+             (unsigned long long)fShared->id(), (unsigned long long)fVmcb.pa,
              (unsigned long long)fShared->npt().rootPa());
     return true;
 }
 
-IOReturn com_overlorddev_RyzenHVVm::map(task_t task, uint64_t uva, uint64_t gpa, uint64_t size, uint32_t flags)
+IOReturn com_amdhv_AMDHVVm::map(task_t task, uint64_t uva, uint64_t gpa, uint64_t size, uint32_t flags)
 {
     return fShared->map(task, uva, gpa, size, flags);
 }
 
-IOReturn com_overlorddev_RyzenHVVm::unmap(uint64_t gpa, uint64_t size)
+IOReturn com_amdhv_AMDHVVm::unmap(uint64_t gpa, uint64_t size)
 {
     return fShared->unmap(gpa, size);
 }
 
-IOReturn com_overlorddev_RyzenHVVm::protect(uint64_t gpa, uint64_t size, uint32_t flags)
+IOReturn com_amdhv_AMDHVVm::protect(uint64_t gpa, uint64_t size, uint32_t flags)
 {
     return fShared->protect(gpa, size, flags);
 }
 
 /* Real-mode reset state. Caller holds the lock (or is still constructing). */
-void com_overlorddev_RyzenHVVm::resetLocked(uint16_t cs, uint16_t ip)
+void com_amdhv_AMDHVVm::resetLocked(uint16_t cs, uint16_t ip)
 {
     Vmcb *v = (Vmcb *)fVmcb.va;
     bzero(v, sizeof(*v));
@@ -711,21 +650,12 @@ void com_overlorddev_RyzenHVVm::resetLocked(uint16_t cs, uint16_t ip)
     fHaveNextRip = false;
     fVmcs.reset();
     if (fGuestFpu.va) {
-        rhv::fpu::initArea((uint8_t *)fGuestFpu.va, 4096);
-        fGuestXcr0 = rhv::fpu::XCR0_X87;
+        amdhv::fpu::initArea((uint8_t *)fGuestFpu.va, 4096);
+        fGuestXcr0 = amdhv::fpu::XCR0_X87;
     }
 }
 
-IOReturn com_overlorddev_RyzenHVVm::reset(uint16_t cs, uint16_t ip)
-{
-    IOLockLock(fLock);
-    resetLocked(cs, ip);
-    IOLockUnlock(fLock);
-    RHV_DBG("VM reset: cs=0x%x ip=0x%x", cs, ip);
-    return kIOReturnSuccess;
-}
-
-IOReturn com_overlorddev_RyzenHVVm::getRegs(RHVRegs *out)
+IOReturn com_amdhv_AMDHVVm::getRegs(AMDHVRegs *out)
 {
     IOLockLock(fLock);
     const Vmcb *v = (const Vmcb *)fVmcb.va;
@@ -751,7 +681,7 @@ IOReturn com_overlorddev_RyzenHVVm::getRegs(RHVRegs *out)
     return kIOReturnSuccess;
 }
 
-IOReturn com_overlorddev_RyzenHVVm::setRegs(const RHVRegs *in)
+IOReturn com_amdhv_AMDHVVm::setRegs(const AMDHVRegs *in)
 {
     IOLockLock(fLock);
     Vmcb *v = (Vmcb *)fVmcb.va;
@@ -787,15 +717,15 @@ IOReturn com_overlorddev_RyzenHVVm::setRegs(const RHVRegs *in)
 static uint32_t classify(uint64_t code)
 {
     switch (code) {
-    case EXIT_HLT:      return RHV_EXIT_HLT;
-    case EXIT_IOIO:     return RHV_EXIT_IO;
-    case EXIT_CPUID:    return RHV_EXIT_CPUID;
-    case EXIT_MSR:      return RHV_EXIT_MSR;
-    case EXIT_NPF:      return RHV_EXIT_NPF;
-    case EXIT_SHUTDOWN: return RHV_EXIT_SHUTDOWN;
-    case EXIT_VMMCALL:  return RHV_EXIT_VMMCALL;
-    case EXIT_INVALID:  return RHV_EXIT_INVALID;
-    default:            return RHV_EXIT_UNHANDLED;
+    case EXIT_HLT:      return AMDHV_EXIT_HLT;
+    case EXIT_IOIO:     return AMDHV_EXIT_IO;
+    case EXIT_CPUID:    return AMDHV_EXIT_CPUID;
+    case EXIT_MSR:      return AMDHV_EXIT_MSR;
+    case EXIT_NPF:      return AMDHV_EXIT_NPF;
+    case EXIT_SHUTDOWN: return AMDHV_EXIT_SHUTDOWN;
+    case EXIT_VMMCALL:  return AMDHV_EXIT_VMMCALL;
+    case EXIT_INVALID:  return AMDHV_EXIT_INVALID;
+    default:            return AMDHV_EXIT_UNHANDLED;
     }
 }
 
@@ -812,7 +742,7 @@ static void kickAction(void *)
         gKickInFlight[cpu] = 0;
 }
 
-void com_overlorddev_RyzenHVVm::kick()
+void com_amdhv_AMDHVVm::kick()
 {
     fKick = 1;
     __atomic_thread_fence(__ATOMIC_SEQ_CST);
@@ -821,33 +751,32 @@ void com_overlorddev_RyzenHVVm::kick()
         mp_cpus_call(1ull << cpu, 2 /* NOSYNC */, kickAction, nullptr);
 }
 
-IOReturn com_overlorddev_RyzenHVVm::run(bool skipInstruction, RHVExit *out)
+IOReturn com_amdhv_AMDHVVm::run(bool skipInstruction, AMDHVExit *out)
 {
     IOReturn rc = kIOReturnSuccess;
     Vmcb *v = (Vmcb *)fVmcb.va;
 
     IOLockLock(fLock);
-    RHV_STAT_INC(vmRuns);
+    AMDHV_STAT_INC(vmRuns);
 
     if (skipInstruction) {
         if (fHaveNextRip && v->control.nextRip)
             v->save.rip = v->control.nextRip;
         else
-            RHV_WARN("VmRun: skip requested but the last exit has no next_rip, RIP unchanged");
+            AMDHV_WARN("VmRun: skip requested but the last exit has no next_rip, RIP unchanged");
     }
     fHaveNextRip = false;
 
     if (fFirstRun) {
         fFirstRun = false;
         /* A wrong VMCB here shows up as VMEXIT_INVALID, anything worse as a panic: leave a trail. */
-        RHV_SYNC("vCPU %u: first VMRUN, rip=0x%llx cs.base=0x%llx efer=0x%llx cr0=0x%llx nCr3=0x%llx", fIndex,
+        AMDHV_SYNC("vCPU %u: first VMRUN, rip=0x%llx cs.base=0x%llx efer=0x%llx cr0=0x%llx nCr3=0x%llx", fIndex,
                  (unsigned long long)v->save.rip, (unsigned long long)v->save.cs.base,
                  (unsigned long long)v->save.efer, (unsigned long long)v->save.cr0,
                  (unsigned long long)v->control.nestedCr3);
     }
 
-    if (fVmx)
-        fVmcs.applyControls();      /* controls and event injection the client set through the VMCS */
+    fVmcs.applyControls();      /* controls and event injection the client set through the VMCS */
 
     uint64_t sliceAbs = 0;
     nanoseconds_to_absolutetime(kTimesliceNs, &sliceAbs);
@@ -944,7 +873,7 @@ IOReturn com_overlorddev_RyzenHVVm::run(bool skipInstruction, RHVExit *out)
         if (!svm::activeOnAllUsable()) {
             fRunCpu = -1;
             ml_set_interrupts_enabled(ints);
-            RHV_ERR("VmRun: SVM was turned off under us (sleep?), not entering the guest");
+            AMDHV_ERR("VmRun: SVM was turned off under us (sleep?), not entering the guest");
             rc = kIOReturnNotReady;
             break;
         }
@@ -957,13 +886,13 @@ IOReturn com_overlorddev_RyzenHVVm::run(bool skipInstruction, RHVExit *out)
             ml_set_interrupts_enabled(ints);
             rescanned  = true;
             needRescan = true;
-            RHV_INFO("VmRun: cpu %d was not known to the SVM code, rescanning", runCpu);
+            AMDHV_INFO("VmRun: cpu %d was not known to the SVM code, rescanning", runCpu);
             continue;
         }
         if (svmFix < 0) {
             fRunCpu = -1;
             ml_set_interrupts_enabled(ints);
-            RHV_ERR("VmRun: SVM cannot be used on cpu %d (not usable or no save area), not entering the guest", runCpu);
+            AMDHV_ERR("VmRun: SVM cannot be used on cpu %d (not usable or no save area), not entering the guest", runCpu);
             rc = kIOReturnNotReady;
             break;
         }
@@ -978,69 +907,65 @@ IOReturn com_overlorddev_RyzenHVVm::run(bool skipInstruction, RHVExit *out)
          * client sees (and a later XSETBV sets) is fGuestXcr0. The only visible difference is that XGETBV in
          * such a guest reads 3 instead of 1.
          */
-        const uint64_t guestX = fGuestXcr0 | rhv::fpu::XCR0_X87 | rhv::fpu::XCR0_SSE;
-        const bool wasTs = rhv::fpu::clearTs();
-        const uint64_t hostX = rhv::fpu::xgetbv0();
+        const uint64_t guestX = fGuestXcr0 | amdhv::fpu::XCR0_X87 | amdhv::fpu::XCR0_SSE;
+        const bool wasTs = amdhv::fpu::clearTs();
+        const uint64_t hostX = amdhv::fpu::xgetbv0();
         if (guestX & ~hostX) {
             fRunCpu = -1;
-            rhv::fpu::restoreTs(wasTs);
+            amdhv::fpu::restoreTs(wasTs);
             ml_set_interrupts_enabled(ints);
-            RHV_ERR("VmRun: guest XCR0 0x%llx needs state this thread has not enabled (0x%llx)",
+            AMDHV_ERR("VmRun: guest XCR0 0x%llx needs state this thread has not enabled (0x%llx)",
                     (unsigned long long)guestX, (unsigned long long)hostX);
             rc = kIOReturnUnsupported;
             break;
         }
-        rhv::fpu::xsave(fHostFpu.va, hostX);
+        amdhv::fpu::xsave(fHostFpu.va, hostX);
         if (guestX != hostX)
-            rhv::fpu::xsetbv0(guestX);
-        rhv::fpu::xrstor(fGuestFpu.va, guestX);
+            amdhv::fpu::xsetbv0(guestX);
+        amdhv::fpu::xrstor(fGuestFpu.va, guestX);
 
         /*
          * Debug registers: VMRUN swaps the guest's DR6/DR7 through the VMCB but neither DR0-DR3 nor the host's own
-         * values (a debugger may have set breakpoints on the calling process). Swap them by hand in VMX mode, where
-         * the client lets the guest use them; in the raw modes every DR access is intercepted.
+         * values (a debugger may have set breakpoints on the calling process). Swap them by hand: the client lets the
+         * guest use them through the framework's register API.
          */
         uint64_t hostDr[6] = { 0, 0, 0, 0, 0, 0 };
-        if (fVmx) {
-            hostDr[0] = rhv_read_dr(0); hostDr[1] = rhv_read_dr(1); hostDr[2] = rhv_read_dr(2);
-            hostDr[3] = rhv_read_dr(3); hostDr[4] = rhv_read_dr(6); hostDr[5] = rhv_read_dr(7);
-            rhv_write_dr(7, 0);                       /* no breakpoint can fire while the registers change */
-            for (unsigned i = 0; i < 4; i++)
-                rhv_write_dr(i, fVmcs.dr(i));
-        }
+        hostDr[0] = amdhv_read_dr(0); hostDr[1] = amdhv_read_dr(1); hostDr[2] = amdhv_read_dr(2);
+        hostDr[3] = amdhv_read_dr(3); hostDr[4] = amdhv_read_dr(6); hostDr[5] = amdhv_read_dr(7);
+        amdhv_write_dr(7, 0);                       /* no breakpoint can fire while the registers change */
+        for (unsigned i = 0; i < 4; i++)
+            amdhv_write_dr(i, fVmcs.dr(i));
 
         /* RDTSCP reads IA32_TSC_AUX, which VMRUN does not switch: put the guest's value in for the run. */
         uint64_t hostTscAux = 0;
-        if (fVmx && fHasTscAux) {
-            hostTscAux = rhv_rdmsr(rhv::msr::MSR_TSC_AUX);
-            rhv_wrmsr(rhv::msr::MSR_TSC_AUX, fVmcs.tscAux());
+        if (fHasTscAux) {
+            hostTscAux = amdhv_rdmsr(amdhv::msr::MSR_TSC_AUX);
+            amdhv_wrmsr(amdhv::msr::MSR_TSC_AUX, fVmcs.tscAux());
         }
 
-        rhv_svm_vmrun(&fGprs, fVmcb.pa, fHostVmcb.pa);
+        amdhv_svm_vmrun(&fGprs, fVmcb.pa, fHostVmcb.pa);
         fRunCpu = -1;
 
-        if (fVmx && fHasTscAux) {
-            fVmcs.setTscAux(rhv_rdmsr(rhv::msr::MSR_TSC_AUX));
-            rhv_wrmsr(rhv::msr::MSR_TSC_AUX, hostTscAux);
+        if (fHasTscAux) {
+            fVmcs.setTscAux(amdhv_rdmsr(amdhv::msr::MSR_TSC_AUX));
+            amdhv_wrmsr(amdhv::msr::MSR_TSC_AUX, hostTscAux);
         }
 
-        if (fVmx) {
-            for (unsigned i = 0; i < 4; i++)
-                fVmcs.setDr(i, rhv_read_dr(i));
-            rhv_write_dr(7, 0);
-            rhv_write_dr(0, hostDr[0]); rhv_write_dr(1, hostDr[1]); rhv_write_dr(2, hostDr[2]);
-            rhv_write_dr(3, hostDr[3]); rhv_write_dr(6, hostDr[4]); rhv_write_dr(7, hostDr[5]);
-        }
+        for (unsigned i = 0; i < 4; i++)
+            fVmcs.setDr(i, amdhv_read_dr(i));
+        amdhv_write_dr(7, 0);
+        amdhv_write_dr(0, hostDr[0]); amdhv_write_dr(1, hostDr[1]); amdhv_write_dr(2, hostDr[2]);
+        amdhv_write_dr(3, hostDr[3]); amdhv_write_dr(6, hostDr[4]); amdhv_write_dr(7, hostDr[5]);
 
-        rhv::fpu::xsave(fGuestFpu.va, guestX);
+        amdhv::fpu::xsave(fGuestFpu.va, guestX);
         if (guestX != hostX)
-            rhv::fpu::xsetbv0(hostX);
-        rhv::fpu::xrstor(fHostFpu.va, hostX);
+            amdhv::fpu::xsetbv0(hostX);
+        amdhv::fpu::xrstor(fHostFpu.va, hostX);
         /* Self-check: the host state must be bit for bit what it was (this code uses no SSE of its own). */
-        rhv::fpu::xsave(fScratchFpu.va, hostX);
-        if (!rhv::fpu::legacyEqual((const uint8_t *)fHostFpu.va, (const uint8_t *)fScratchFpu.va))
-            RHV_STAT_INC(vmFpuMismatches);
-        rhv::fpu::restoreTs(wasTs);
+        amdhv::fpu::xsave(fScratchFpu.va, hostX);
+        if (!amdhv::fpu::legacyEqual((const uint8_t *)fHostFpu.va, (const uint8_t *)fScratchFpu.va))
+            AMDHV_STAT_INC(vmFpuMismatches);
+        amdhv::fpu::restoreTs(wasTs);
 
         __asm__ volatile("movq %0, %%cr2" : : "r"(hostCr2));
         ml_set_interrupts_enabled(ints);   /* a pending host interrupt is taken right here */
@@ -1048,12 +973,12 @@ IOReturn com_overlorddev_RyzenHVVm::run(bool skipInstruction, RHVExit *out)
         if (svmFix > 0) {
             static volatile SInt32 healLogged;
             if (OSIncrementAtomic(&healLogged) < 20)
-                RHV_WARN("VmRun: EFER.SVME or VM_HSAVE_PA was wrong on cpu %d and was restored before VMRUN (%u times so far)", runCpu,
+                AMDHV_WARN("VmRun: EFER.SVME or VM_HSAVE_PA was wrong on cpu %d and was restored before VMRUN (%u times so far)", runCpu,
                          svm::healedCount());
         }
 
         code = v->control.exitCode;
-        RHV_STAT_INC(vmExits);
+        AMDHV_STAT_INC(vmExits);
         /* The injection was either delivered or is reported in exitIntInfo; do not let it fire a second time. */
         v->control.eventInj    = 0;
         v->control.eventInjErr = 0;
@@ -1063,7 +988,7 @@ IOReturn com_overlorddev_RyzenHVVm::run(bool skipInstruction, RHVExit *out)
          * client's guest has no such instructions, so what it would see on Intel with VMX off is #UD: inject that
          * and let the guest handle it.
          */
-        if (fVmx && (code == 0x80 || (code >= 0x82 && code <= 0x86))) {
+        if (code == 0x80 || (code >= 0x82 && code <= 0x86)) {
             v->control.eventInj = (1u << 31) | (3u << 8) | 6;
             continue;
         }
@@ -1088,7 +1013,7 @@ IOReturn com_overlorddev_RyzenHVVm::run(bool skipInstruction, RHVExit *out)
          * to drop below its threshold. Handle it here, without a trip to userland: set V_TPR, step over the instruction,
          * and report "TPR below threshold" only when the new value really is below the threshold.
          */
-        if (fVmx && code == 0x18 && fVmcs.tprShadowActive() && (v->control.exitInfo1 >> 63) && v->control.nextRip) {
+        if (code == 0x18 && fVmcs.tprShadowActive() && (v->control.exitInfo1 >> 63) && v->control.nextRip) {
             unsigned gpr = (unsigned)(v->control.exitInfo1 & 0xF);
             uint64_t val;
             switch (gpr) {
@@ -1118,7 +1043,7 @@ IOReturn com_overlorddev_RyzenHVVm::run(bool skipInstruction, RHVExit *out)
                 }
                 if (val < fVmcs.tprThreshold()) {
                     timeslice = true;
-                    syntheticReason = rhv::vmx::VMX_TPR_BELOW_THRESHOLD;
+                    syntheticReason = amdhv::vmx::VMX_TPR_BELOW_THRESHOLD;
                     takePendingEvent();
                     break;
                 }
@@ -1137,42 +1062,39 @@ IOReturn com_overlorddev_RyzenHVVm::run(bool skipInstruction, RHVExit *out)
         bool vmxTranslated = false;
         bzero(out, sizeof(*out));
         if (timeslice) {
-            out->reason = RHV_EXIT_TIMESLICE;
-            if (fVmx)
-                fVmcs.recordSynthetic(syntheticReason ? syntheticReason : rhv::vmx::VMX_EXT_INTR, carryInfo, carryErr);
+            out->reason = AMDHV_EXIT_TIMESLICE;
+            fVmcs.recordSynthetic(syntheticReason ? syntheticReason : amdhv::vmx::VMX_EXT_INTR, carryInfo, carryErr);
         } else {
             out->reason   = classify(code);
-            if (out->reason == RHV_EXIT_NPF)
-                RHV_STAT_INC(vmNptFaults);
+            if (out->reason == AMDHV_EXIT_NPF)
+                AMDHV_STAT_INC(vmNptFaults);
             out->exitCode = code;
             out->info1    = v->control.exitInfo1;
             out->info2    = v->control.exitInfo2;
             out->nextRip  = v->control.nextRip;
             fHaveNextRip  = v->control.nextRip != 0;
-            if (fVmx) {
-                vmxTranslated = true;
-                uint32_t perm = 0;
-                if (code == EXIT_NPF) {
-                    IORWLockRead(fShared->rw());
-                    fShared->npt().lookup(v->control.exitInfo2 & ~(uint64_t)0xFFF, nullptr, &perm);
-                    IORWLockUnlock(fShared->rw());
-                }
-                if (!fVmcs.recordExit(perm)) {
-                    vmxTranslated = false;
-                    out->reason = RHV_EXIT_UNHANDLED;
-                }      /* e.g. the guest executed an SVM instruction */
+            vmxTranslated = true;
+            uint32_t perm = 0;
+            if (code == EXIT_NPF) {
+                IORWLockRead(fShared->rw());
+                fShared->npt().lookup(v->control.exitInfo2 & ~(uint64_t)0xFFF, nullptr, &perm);
+                IORWLockUnlock(fShared->rw());
             }
-            RHV_TRACE("VM exit: code=0x%llx info1=0x%llx info2=0x%llx rip=0x%llx",
+            if (!fVmcs.recordExit(perm)) {
+                vmxTranslated = false;
+                out->reason = AMDHV_EXIT_UNHANDLED;
+            }      /* e.g. the guest executed an SVM instruction */
+            AMDHV_TRACE("VM exit: code=0x%llx info1=0x%llx info2=0x%llx rip=0x%llx",
                       (unsigned long long)code, (unsigned long long)out->info1,
                       (unsigned long long)out->info2, (unsigned long long)v->save.rip);
         }
         out->rip = v->save.rip;
 
-        if (out->reason == RHV_EXIT_INVALID) {
-            RHV_STAT_INC(vmInvalidExits);
+        if (out->reason == AMDHV_EXIT_INVALID) {
+            AMDHV_STAT_INC(vmInvalidExits);
             dumpVmcb("VMRUN rejected the VMCB (VMEXIT_INVALID)");
-        } else if (out->reason == RHV_EXIT_UNHANDLED && !vmxTranslated) {      /* CR/DR accesses, interrupt windows... are fine in VMX mode */
-            RHV_WARN("VM exit with unhandled code 0x%llx at rip 0x%llx", (unsigned long long)code,
+        } else if (out->reason == AMDHV_EXIT_UNHANDLED && !vmxTranslated) {      /* CR/DR accesses, interrupt windows... are fine in VMX mode */
+            AMDHV_WARN("VM exit with unhandled code 0x%llx at rip 0x%llx", (unsigned long long)code,
                      (unsigned long long)v->save.rip);
         }
     }
@@ -1181,11 +1103,9 @@ IOReturn com_overlorddev_RyzenHVVm::run(bool skipInstruction, RHVExit *out)
     return rc;
 }
 
-IOReturn com_overlorddev_RyzenHVVm::msrOp(uint32_t op, uint32_t msrNum, uint64_t value, uint64_t *out)
+IOReturn com_amdhv_AMDHVVm::msrOp(uint32_t op, uint32_t msrNum, uint64_t value, uint64_t *out)
 {
-    using namespace rhv::msr;
-    if (!fVmx)
-        return kIOReturnUnsupported;
+    using namespace amdhv::msr;
     Info mi = info(msrNum);
     if (mi.kind == K_UNKNOWN)
         return kIOReturnBadArgument;
@@ -1193,7 +1113,7 @@ IOReturn com_overlorddev_RyzenHVVm::msrOp(uint32_t op, uint32_t msrNum, uint64_t
     IOReturn rc = kIOReturnSuccess;
     IOLockLock(fLock);
     switch (op) {
-    case RHV_MSR_READ: {
+    case AMDHV_MSR_READ: {
         uint64_t tsc = 0;
         if (mi.kind == K_TSC) {
             uint32_t lo, hi;
@@ -1201,25 +1121,25 @@ IOReturn com_overlorddev_RyzenHVVm::msrOp(uint32_t op, uint32_t msrNum, uint64_t
             tsc = ((uint64_t)hi << 32) | lo;
         }
         *out = 0;
-        if (fVmcs.readMsr(msrNum, tsc, out) != rhv::vmx::R_OK)
+        if (fVmcs.readMsr(msrNum, tsc, out) != amdhv::vmx::R_OK)
             rc = kIOReturnBadArgument;
         break;
     }
-    case RHV_MSR_WRITE: {
+    case AMDHV_MSR_WRITE: {
         uint64_t tsc = 0;
         if (mi.kind == K_TSC) {
             uint32_t lo, hi;
             __asm__ volatile("rdtsc" : "=a"(lo), "=d"(hi));
             tsc = ((uint64_t)hi << 32) | lo;
         }
-        if (fVmcs.writeMsr(msrNum, tsc, value) != rhv::vmx::R_OK)
+        if (fVmcs.writeMsr(msrNum, tsc, value) != amdhv::vmx::R_OK)
             rc = kIOReturnBadArgument;
         break;
     }
-    case RHV_MSR_NATIVE_ENABLE:
-    case RHV_MSR_NATIVE_DISABLE:
+    case AMDHV_MSR_NATIVE_ENABLE:
+    case AMDHV_MSR_NATIVE_DISABLE:
         /* The guest EFER must keep SVME set, so it can never be written without an exit. */
-        if (mi.kind == K_EFER || !setNative((uint8_t *)fMsrpm.va, msrNum, op == RHV_MSR_NATIVE_ENABLE))
+        if (mi.kind == K_EFER || !setNative((uint8_t *)fMsrpm.va, msrNum, op == AMDHV_MSR_NATIVE_ENABLE))
             rc = kIOReturnBadArgument;
         break;
     default:
@@ -1229,7 +1149,7 @@ IOReturn com_overlorddev_RyzenHVVm::msrOp(uint32_t op, uint32_t msrNum, uint64_t
     return rc;
 }
 
-IOReturn com_overlorddev_RyzenHVVm::getFpu(RHVFpuState *out)
+IOReturn com_amdhv_AMDHVVm::getFpu(AMDHVFpuState *out)
 {
     bzero(out, sizeof(*out));
     IOLockLock(fLock);
@@ -1240,12 +1160,12 @@ IOReturn com_overlorddev_RyzenHVVm::getFpu(RHVFpuState *out)
     return kIOReturnSuccess;
 }
 
-IOReturn com_overlorddev_RyzenHVVm::setFpu(const RHVFpuState *in)
+IOReturn com_amdhv_AMDHVVm::setFpu(const AMDHVFpuState *in)
 {
     /* Everything XRSTOR or XSETBV would fault on is refused here: a fault in the kernel is a panic. */
-    const uint64_t hostX = rhv::fpu::xgetbv0();
-    if (in->size != fFpuSize || !rhv::fpu::validXcr0(in->xcr0, fXcr0Supported) || (in->xcr0 & ~hostX) ||
-        !rhv::fpu::validArea(in->area, fFpuSize, in->xcr0 | rhv::fpu::XCR0_X87 | rhv::fpu::XCR0_SSE))
+    const uint64_t hostX = amdhv::fpu::xgetbv0();
+    if (in->size != fFpuSize || !amdhv::fpu::validXcr0(in->xcr0, fXcr0Supported) || (in->xcr0 & ~hostX) ||
+        !amdhv::fpu::validArea(in->area, fFpuSize, in->xcr0 | amdhv::fpu::XCR0_X87 | amdhv::fpu::XCR0_SSE))
         return kIOReturnBadArgument;
     IOLockLock(fLock);
     fGuestXcr0 = in->xcr0;
@@ -1254,25 +1174,18 @@ IOReturn com_overlorddev_RyzenHVVm::setFpu(const RHVFpuState *in)
     return kIOReturnSuccess;
 }
 
-uint8_t com_overlorddev_RyzenHVVm::debugCpl()
+IOReturn com_amdhv_AMDHVVm::vmcsRead(uint32_t field, uint64_t *value)
 {
-    return ((const Vmcb *)fVmcb.va)->save.cpl;
-}
-
-IOReturn com_overlorddev_RyzenHVVm::vmcsRead(uint32_t field, uint64_t *value)
-{
-    if (!fVmx)
-        return kIOReturnUnsupported;
     IOLockLock(fLock);
-    rhv::vmx::Result r = fVmcs.read(field, value);
+    amdhv::vmx::Result r = fVmcs.read(field, value);
     IOLockUnlock(fLock);
-    return r == rhv::vmx::R_OK ? kIOReturnSuccess : kIOReturnBadArgument;
+    return r == amdhv::vmx::R_OK ? kIOReturnSuccess : kIOReturnBadArgument;
 }
 
-IOReturn com_overlorddev_RyzenHVVm::vmcsReadMany(const RHVReadMany *in, RHVReadManyOut *out)
+IOReturn com_amdhv_AMDHVVm::vmcsReadMany(const AMDHVReadMany *in, AMDHVReadManyOut *out)
 {
     bzero(out, sizeof(*out));
-    if (in->count > RHV_READMANY_MAX)
+    if (in->count > AMDHV_READMANY_MAX)
         return kIOReturnBadArgument;
     for (uint32_t i = 0; i < in->count; i++) {
         IOReturn rc = vmcsRead(in->fields[i], &out->values[i]);
@@ -1282,14 +1195,14 @@ IOReturn com_overlorddev_RyzenHVVm::vmcsReadMany(const RHVReadMany *in, RHVReadM
     return kIOReturnSuccess;
 }
 
-IOReturn com_overlorddev_RyzenHVVm::runEx(const RHVRunIn *in, RHVRunOut *out)
+IOReturn com_amdhv_AMDHVVm::runEx(const AMDHVRunIn *in, AMDHVRunOut *out)
 {
     bzero(out, sizeof(*out));
-    if (in->nWrites > RHV_RUN_MAX_WRITES)
+    if (in->nWrites > AMDHV_RUN_MAX_WRITES)
         return kIOReturnBadArgument;
 
     IOReturn rc;
-    if (in->flags & RHV_RUN_REGS) {
+    if (in->flags & AMDHV_RUN_REGS) {
         rc = setRegs(&in->regs);
         if (rc != kIOReturnSuccess)
             return rc;
@@ -1301,8 +1214,8 @@ IOReturn com_overlorddev_RyzenHVVm::runEx(const RHVRunIn *in, RHVRunOut *out)
             return rc;
         }
     }
-    if (!(in->flags & RHV_RUN_NO_RUN)) {
-        rc = run((in->flags & RHV_RUN_SKIP) != 0, &out->exit);
+    if (!(in->flags & AMDHV_RUN_NO_RUN)) {
+        rc = run((in->flags & AMDHV_RUN_SKIP) != 0, &out->exit);
         if (rc != kIOReturnSuccess)
             return rc;
     }
@@ -1310,48 +1223,46 @@ IOReturn com_overlorddev_RyzenHVVm::runEx(const RHVRunIn *in, RHVRunOut *out)
     getRegs(&out->regs);
     unsigned n = 0;
     IOLockLock(fLock);                                    /* one lock for all the fields, not one per field */
-#define RHV_X(enc) do { uint64_t v_ = 0; if (fVmx) (void)fVmcs.read(enc, &v_); out->fields[n++] = v_; } while (0);
-    RHV_RUN_FIELDS_LIST(RHV_X)
-#undef RHV_X
+#define AMDHV_X(enc) do { uint64_t v_ = 0; (void)fVmcs.read(enc, &v_); out->fields[n++] = v_; } while (0);
+    AMDHV_RUN_FIELDS_LIST(AMDHV_X)
+#undef AMDHV_X
     IOLockUnlock(fLock);
     return kIOReturnSuccess;
 }
 
-IOReturn com_overlorddev_RyzenHVVm::vmcsWrite(uint32_t field, uint64_t value)
+IOReturn com_amdhv_AMDHVVm::vmcsWrite(uint32_t field, uint64_t value)
 {
-    if (!fVmx)
-        return kIOReturnUnsupported;
     /* MOV to DR0-DR3 faults on a non-canonical address, and the kext loads these in kernel mode. */
-    if (field >= rhv::vmx::X_DR0 && field <= rhv::vmx::X_DR3 && (uint64_t)(((int64_t)(value << 16)) >> 16) != value)
+    if (field >= amdhv::vmx::X_DR0 && field <= amdhv::vmx::X_DR3 && (uint64_t)(((int64_t)(value << 16)) >> 16) != value)
         return kIOReturnBadArgument;
     IOLockLock(fLock);
-    rhv::vmx::Result r = fVmcs.write(field, value);
-    if (r == rhv::vmx::R_OK && field == rhv::vmx::F_GUEST_RIP)
+    amdhv::vmx::Result r = fVmcs.write(field, value);
+    if (r == amdhv::vmx::R_OK && field == amdhv::vmx::F_GUEST_RIP)
         fHaveNextRip = false;           /* the client moved RIP itself */
     IOLockUnlock(fLock);
     switch (r) {
-    case rhv::vmx::R_OK:         return kIOReturnSuccess;
-    case rhv::vmx::R_READ_ONLY:  return kIOReturnNotWritable;
+    case amdhv::vmx::R_OK:         return kIOReturnSuccess;
+    case amdhv::vmx::R_READ_ONLY:  return kIOReturnNotWritable;
     default:                     return kIOReturnBadArgument;
     }
 }
 
-void com_overlorddev_RyzenHVVm::dumpVmcb(const char *why)
+void com_amdhv_AMDHVVm::dumpVmcb(const char *why)
 {
     const Vmcb *v = (const Vmcb *)fVmcb.va;
-    RHV_ERR("VMCB dump: %s", why);
-    RHV_ERR("  efer=0x%llx cr0=0x%llx cr3=0x%llx cr4=0x%llx rflags=0x%llx rip=0x%llx",
+    AMDHV_ERR("VMCB dump: %s", why);
+    AMDHV_ERR("  efer=0x%llx cr0=0x%llx cr3=0x%llx cr4=0x%llx rflags=0x%llx rip=0x%llx",
             (unsigned long long)v->save.efer, (unsigned long long)v->save.cr0,
             (unsigned long long)v->save.cr3, (unsigned long long)v->save.cr4,
             (unsigned long long)v->save.rflags, (unsigned long long)v->save.rip);
-    RHV_ERR("  cs sel=0x%x base=0x%llx lim=0x%x attr=0x%x  dr6=0x%llx dr7=0x%llx",
+    AMDHV_ERR("  cs sel=0x%x base=0x%llx lim=0x%x attr=0x%x  dr6=0x%llx dr7=0x%llx",
             v->save.cs.selector, (unsigned long long)v->save.cs.base, v->save.cs.limit,
             v->save.cs.attrib, (unsigned long long)v->save.dr6, (unsigned long long)v->save.dr7);
-    RHV_ERR("  asid=%u nested_ctl=0x%llx n_cr3=0x%llx v3=0x%x v4=0x%x int_ctl=0x%x",
+    AMDHV_ERR("  asid=%u nested_ctl=0x%llx n_cr3=0x%llx v3=0x%x v4=0x%x int_ctl=0x%x",
             v->control.asid, (unsigned long long)v->control.nestedCtl,
             (unsigned long long)v->control.nestedCr3, v->control.interceptVec3,
             v->control.interceptVec4, v->control.intCtl);
-    RHV_ERR("  iopm=0x%llx msrpm=0x%llx exit=0x%llx info1=0x%llx info2=0x%llx",
+    AMDHV_ERR("  iopm=0x%llx msrpm=0x%llx exit=0x%llx info1=0x%llx info2=0x%llx",
             (unsigned long long)v->control.iopmBasePa, (unsigned long long)v->control.msrpmBasePa,
             (unsigned long long)v->control.exitCode, (unsigned long long)v->control.exitInfo1,
             (unsigned long long)v->control.exitInfo2);

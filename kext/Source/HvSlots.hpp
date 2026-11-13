@@ -2,12 +2,12 @@
  * HvSlots.hpp - the framework's VMCS field <-> cache slot tables (see docs/NATIVE.md). Generated from the framework's own
  * table; only numbers. kFieldSlot[enc >> 1] is the slot of a VMCS field (0 = no slot), kSlotField[slot] the encoding of a slot.
  */
-#ifndef RYZENHV_HVSLOTS_HPP
-#define RYZENHV_HVSLOTS_HPP
+#ifndef AMDHV_HVSLOTS_HPP
+#define AMDHV_HVSLOTS_HPP
 
 #include <stdint.h>
 
-namespace rhv {
+namespace amdhv {
 namespace hv {
 
 constexpr unsigned kMaxSlot = 148;
@@ -468,6 +468,6 @@ static const uint8_t kFieldSlot[kFieldSlotCount] = {
 };
 
 } // namespace hv
-} // namespace rhv
+} // namespace amdhv
 
 #endif

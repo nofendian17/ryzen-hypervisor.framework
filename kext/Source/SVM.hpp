@@ -1,22 +1,21 @@
 /*
  * SVM.hpp - AMD-V (SVM) capability probing and per-CPU enable/disable.
- *
- * Phase 0 only: no VMCB, no VMRUN yet. See docs/ROADMAP.md.
  */
-#ifndef RYZENHV_SVM_HPP
-#define RYZENHV_SVM_HPP
+#ifndef AMDHV_SVM_HPP
+#define AMDHV_SVM_HPP
 
-#include "../../include/RyzenHVShared.h"
+#include "../../include/AMDHVShared.h"
 
-namespace rhv {
+namespace amdhv {
 namespace svm {
 
 /*
- * Reads CPUID (and, with readMsrs, VM_CR and EFER) on every logical CPU and fills `out`.
- * Read-only. Without readMsrs the BIOS-disabled/locked flags are unknown and reported as 0:
- * that mode exists to bisect a crash (see boot-arg rhv_stage).
+ * Reads CPUID, VM_CR and EFER on every logical CPU and fills `out`. Read-only.
+ * The readMsrs=false variant skips the MSR reads (the BIOS-disabled/locked flags
+ * then read as 0); it only exists to bisect a boot crash by passing false from a
+ * modified caller.
  */
-void probe(RHVInfo *out, bool readMsrs);
+void probe(AMDHVInfo *out, bool readMsrs);
 
 /*
  * Sets EFER.SVME and VM_HSAVE_PA on every CPU where SVM is supported and not
@@ -79,13 +78,7 @@ uint32_t rescan();
 uint32_t cpuCount();
 uint32_t usableCpuCount();
 
-/*
- * Debugging only (`rhv-info hv svmlimit N`): forgets every CPU from index n up and turns SVM off on them, which puts the SVM code in the state of a kext that started
- * before those CPUs were online, so rescan() and the guard in VmRun can be tried on a machine where the cores come up in time. Returns false for a bad n.
- */
-bool debugLimit(uint32_t n);
-
 } // namespace svm
-} // namespace rhv
+} // namespace amdhv
 
-#endif /* RYZENHV_SVM_HPP */
+#endif /* AMDHV_SVM_HPP */

@@ -18,14 +18,14 @@
  *
  * Not thread safe: the caller serialises (the Vm lock).
  */
-#ifndef RYZENHV_NPT_HPP
-#define RYZENHV_NPT_HPP
+#ifndef AMDHV_NPT_HPP
+#define AMDHV_NPT_HPP
 
 #include <stddef.h>
 #include <stdint.h>
 #include <string.h>
 
-namespace rhv {
+namespace amdhv {
 namespace npt {
 
 /* Same values as the hv_memory_flags_t of Hypervisor.framework. */
@@ -367,6 +367,6 @@ private:
 };
 
 } // namespace npt
-} // namespace rhv
+} // namespace amdhv
 
-#endif /* RYZENHV_NPT_HPP */
+#endif /* AMDHV_NPT_HPP */

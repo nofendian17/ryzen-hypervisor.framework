@@ -4,10 +4,10 @@
  * It does what QEMU's HVF accelerator does, in the same order: create a VM, map memory, create a vCPU, read the VMX
  * capabilities and build the execution controls from them, set up a real-mode machine through VMCS fields and
  * registers, then run it and handle exits by reading the VMCS exit reason. On a real Intel Mac the same binary runs
- * against Apple's framework; on this Ryzen it runs through the RyzenHV shim:
+ * against Apple's framework; on a Hackintosh with AMD it runs through the AMDHV kext (native mode, boot-arg amdhv_hv=1):
  *
  *     sudo env DYLD_INSERT_LIBRARIES=build/libryzenhv.dylib ./build/hvf-smoke
- *     (or: scripts/run-with-shim.sh ./build/hvf-smoke)
+
  *
  * It checks: the VMX capability path, controls, registers, MSRs, FPU state, serial output through I/O exits, CPUID,
  * HLT, an EPT violation handled by mapping memory, hv_vcpu_interrupt from another thread, and error codes.
@@ -151,7 +151,7 @@ int main(void)
 {
     hv_return_t r = hv_vm_create(HV_VM_DEFAULT);
     if (r != HV_SUCCESS) {
-        fprintf(stderr, "hv_vm_create failed: %#x. On a Ryzen run this through the shim (scripts/run-with-shim.sh).\n", (unsigned)r);
+        fprintf(stderr, "hv_vm_create failed: %#x. On a Hackintosh boot with the AMDHV kext (amdhv_hv=1, kern.hv_support=1).\n", (unsigned)r);
         return 1;
     }
     printf("hv_vm_create ok\n");
@@ -209,7 +209,7 @@ int main(void)
     wreg(v, HV_X86_DR6, 0xFFFF0FF0);
     EXPECT(rreg(v, HV_X86_CR2) == 0xc2c2000 && rreg(v, HV_X86_DR6) == 0xFFFF0FF0, "CR2 and DR6 round trip");
     uint64_t bad;
-    /* the shim refuses CR1; Apple's own framework reads it straight from its shared page and answers 0 */
+    /* the kext refuses CR1; Apple's own framework reads it straight from its shared page and answers 0 */
     bad = 0xdead;
     hv_return_t cr1 = hv_vcpu_read_register(v, HV_X86_CR1, &bad);
     EXPECT(cr1 != HV_SUCCESS || bad == 0, "CR1 does not exist (an error, or 0 as Apple's framework answers)");
@@ -306,7 +306,7 @@ int main(void)
     uint64_t junk;
     EXPECT(hv_vmx_vcpu_read_vmcs(v, 0x12345, &junk) != HV_SUCCESS, "an unknown VMCS field is refused");
     {
-        hv_return_t dr = hv_vm_destroy();      /* HV_BUSY from the shim, HV_ERROR from Apple's own framework */
+        hv_return_t dr = hv_vm_destroy();      /* HV_BUSY from the kext, HV_ERROR from Apple's own framework */
         EXPECT(dr == HV_BUSY || dr == HV_ERROR, "hv_vm_destroy with a live vCPU is refused (0x%x)", (unsigned)dr);
     }
 

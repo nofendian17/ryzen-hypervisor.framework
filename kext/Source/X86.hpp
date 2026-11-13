@@ -4,34 +4,34 @@
  * WARNING: RDMSR/WRMSR on an MSR the CPU does not implement raises #GP,
  * which panics the kernel. Only touch MSRs after the matching CPUID check.
  */
-#ifndef RYZENHV_X86_HPP
-#define RYZENHV_X86_HPP
+#ifndef AMDHV_X86_HPP
+#define AMDHV_X86_HPP
 
 #include <stdint.h>
 
-#define RHV_MSR_EFER        0xC0000080u
-#define RHV_MSR_VM_CR       0xC0010114u
-#define RHV_MSR_VM_HSAVE_PA 0xC0010117u
+#define AMDHV_MSR_EFER        0xC0000080u
+#define AMDHV_MSR_VM_CR       0xC0010114u
+#define AMDHV_MSR_VM_HSAVE_PA 0xC0010117u
 
-#define RHV_EFER_SVME       (1ull << 12)
-#define RHV_VM_CR_LOCK      (1ull << 3)
-#define RHV_VM_CR_SVMDIS    (1ull << 4)
+#define AMDHV_EFER_SVME       (1ull << 12)
+#define AMDHV_VM_CR_LOCK      (1ull << 3)
+#define AMDHV_VM_CR_SVMDIS    (1ull << 4)
 
-static inline void rhv_cpuid(uint32_t leaf, uint32_t sub, uint32_t out[4])
+static inline void amdhv_cpuid(uint32_t leaf, uint32_t sub, uint32_t out[4])
 {
     __asm__ volatile("cpuid"
                      : "=a"(out[0]), "=b"(out[1]), "=c"(out[2]), "=d"(out[3])
                      : "a"(leaf), "c"(sub));
 }
 
-static inline uint64_t rhv_rdmsr(uint32_t msr)
+static inline uint64_t amdhv_rdmsr(uint32_t msr)
 {
     uint32_t lo, hi;
     __asm__ volatile("rdmsr" : "=a"(lo), "=d"(hi) : "c"(msr));
     return ((uint64_t)hi << 32) | lo;
 }
 
-static inline void rhv_wrmsr(uint32_t msr, uint64_t value)
+static inline void amdhv_wrmsr(uint32_t msr, uint64_t value)
 {
     __asm__ volatile("wrmsr"
                      :
@@ -39,7 +39,7 @@ static inline void rhv_wrmsr(uint32_t msr, uint64_t value)
 }
 
 /* Debug registers. VMRUN loads and stores the guest's DR6 and DR7 but not DR0-DR3, and it does not keep the host's. */
-static inline uint64_t rhv_read_dr(unsigned n)
+static inline uint64_t amdhv_read_dr(unsigned n)
 {
     uint64_t v = 0;
     switch (n) {
@@ -54,7 +54,7 @@ static inline uint64_t rhv_read_dr(unsigned n)
     return v;
 }
 
-static inline void rhv_write_dr(unsigned n, uint64_t v)
+static inline void amdhv_write_dr(unsigned n, uint64_t v)
 {
     switch (n) {
     case 0: __asm__ volatile("movq %0, %%dr0" : : "r"(v)); break;
@@ -67,4 +67,4 @@ static inline void rhv_write_dr(unsigned n, uint64_t v)
     }
 }
 
-#endif /* RYZENHV_X86_HPP */
+#endif /* AMDHV_X86_HPP */

@@ -4,7 +4,7 @@
 
 #include "../kext/Source/MsrMap.hpp"
 
-using namespace rhv::msr;
+using namespace amdhv::msr;
 
 static int fails;
 #define CHECK(c) do { if (!(c)) { printf("FAIL %s:%d: %s\n", __FILE__, __LINE__, #c); fails++; } } while (0)

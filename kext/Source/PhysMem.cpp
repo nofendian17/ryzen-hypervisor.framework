@@ -3,7 +3,7 @@
 #include "Log.hpp"
 #include "PhysMem.hpp"
 
-namespace rhv {
+namespace amdhv {
 
 bool physAlloc(PhysMem *m, size_t size)
 {
@@ -14,7 +14,7 @@ bool physAlloc(PhysMem *m, size_t size)
         kernel_task, kIODirectionInOut | kIOMemoryPhysicallyContiguous, size,
         0x000FFFFFFFFFF000ULL);
     if (!md) {
-        RHV_ERR("physAlloc(%zu): out of contiguous memory", size);
+        AMDHV_ERR("physAlloc(%zu): out of contiguous memory", size);
         return false;
     }
 
@@ -24,7 +24,7 @@ bool physAlloc(PhysMem *m, size_t size)
     IOByteCount len = 0;
     addr64_t pa = md->getPhysicalSegment(0, &len, kIOMemoryMapperNone);
     if (!pa || (pa & 0xFFF) || len < size) {
-        RHV_ERR("physAlloc(%zu): bad physical segment pa=0x%llx len=%llu", size,
+        AMDHV_ERR("physAlloc(%zu): bad physical segment pa=0x%llx len=%llu", size,
                 (unsigned long long)pa, (unsigned long long)len);
         md->release();
         return false;
@@ -44,4 +44,4 @@ void physFree(PhysMem *m)
     bzero(m, sizeof(*m));
 }
 
-} // namespace rhv
+} // namespace amdhv

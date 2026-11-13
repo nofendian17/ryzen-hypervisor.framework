@@ -3,8 +3,8 @@
  * headers. All of them resolve through com.apple.kpi.unsupported / .mach.
  * If the link step reports one of these as undefined, tell me which.
  */
-#ifndef RYZENHV_KERNELDECLS_HPP
-#define RYZENHV_KERNELDECLS_HPP
+#ifndef AMDHV_KERNELDECLS_HPP
+#define AMDHV_KERNELDECLS_HPP
 
 #include <stdint.h>
 
@@ -17,7 +17,7 @@ uint64_t     mach_absolute_time(void);
 void         nanoseconds_to_absolutetime(uint64_t nanoseconds, uint64_t *result);
 struct task *current_task(void);
 int          ml_set_interrupts_enabled(int enable);   /* returns the previous state */
-void         rhv_svm_vmrun(void *guestGprs, uint64_t guestVmcbPa, uint64_t hostVmcbPa);  /* SvmRun.S */
+void         amdhv_svm_vmrun(void *guestGprs, uint64_t guestVmcbPa, uint64_t hostVmcbPa);  /* SvmRun.S */
 }
 
-#endif /* RYZENHV_KERNELDECLS_HPP */
+#endif /* AMDHV_KERNELDECLS_HPP */

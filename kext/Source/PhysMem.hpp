@@ -3,13 +3,13 @@
  * with both a kernel virtual address and a physical address. Used for the
  * VMCB, the permission bitmaps and the nested page tables.
  */
-#ifndef RYZENHV_PHYSMEM_HPP
-#define RYZENHV_PHYSMEM_HPP
+#ifndef AMDHV_PHYSMEM_HPP
+#define AMDHV_PHYSMEM_HPP
 
 #include <IOKit/IOBufferMemoryDescriptor.h>
 #include <stdint.h>
 
-namespace rhv {
+namespace amdhv {
 
 struct PhysMem {
     IOBufferMemoryDescriptor *md;
@@ -22,6 +22,6 @@ struct PhysMem {
 bool physAlloc(PhysMem *m, size_t size);
 void physFree(PhysMem *m);
 
-} // namespace rhv
+} // namespace amdhv
 
-#endif /* RYZENHV_PHYSMEM_HPP */
+#endif /* AMDHV_PHYSMEM_HPP */

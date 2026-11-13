@@ -12,7 +12,7 @@
 
 #include "../kext/Source/Npt.hpp"
 
-using namespace rhv::npt;
+using namespace amdhv::npt;
 
 namespace {
 

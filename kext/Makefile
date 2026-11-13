@@ -1,14 +1,9 @@
-# Command-line build of RyzenHV.kext, NO Xcode project needed.
-#
-# STATUS: best effort, not verified on a real Sequoia SDK yet. If it fails,
-# the two usual suspects are the library search path for -lkmod/-lkmodc++/
-# -lcc_kext and missing Kernel.framework headers. Paste me the error, or
-# fall back to an Xcode kext project (copy the build settings of VoodooTSCSync).
+# Command-line build of AMDHV.kext, NO Xcode project needed.
 
 SDK     := $(shell xcrun --sdk macosx --show-sdk-path)
 KFW     := $(SDK)/System/Library/Frameworks/Kernel.framework
 OUT     := ../build
-KEXT    := $(OUT)/RyzenHV.kext
+KEXT    := $(OUT)/AMDHV.kext
 OBJDIR  := $(OUT)/kext-obj
 
 CXXSRC  := $(wildcard Source/*.cpp)
@@ -18,10 +13,10 @@ OBJS    := $(patsubst Source/%.cpp,$(OBJDIR)/%.o,$(CXXSRC)) \
            $(patsubst Source/%.c,$(OBJDIR)/%.o,$(CSRC)) \
            $(patsubst Source/%.S,$(OBJDIR)/%.o,$(ASMSRC))
 
-# make DEBUG=1  ->  -O0 -g, RHV_DEBUG defined (kernel log level defaults to DEBUG)
+# make DEBUG=1  ->  -O0 -g, AMDHV_DEBUG defined (kernel log level defaults to DEBUG)
 DEBUG   ?= 0
 ifeq ($(DEBUG),1)
-OPT     := -O0 -g -DRHV_DEBUG=1
+OPT     := -O0 -g -DAMDHV_DEBUG=1
 else
 OPT     := -O2
 endif
@@ -57,11 +52,11 @@ $(KEXT): $(OBJS) Info.plist
 	cp Info.plist $(KEXT)/Contents/Info.plist
 	xcrun clang++ -arch x86_64 -isysroot $(SDK) -mkernel -nostdlib -fapple-kext \
 		-Xlinker -kext -L$(SDK)/usr/lib \
-		-o $(KEXT)/Contents/MacOS/RyzenHV $(OBJS) \
+		-o $(KEXT)/Contents/MacOS/AMDHV $(OBJS) \
 		-lkmodc++ -lkmod -lcc_kext
 	../scripts/check-kext-symbols.sh $(KEXT)
 	@echo "Built $(KEXT)"
-	@echo "OpenCore loads it unsigned via Kernel -> Add, see docs/RYZENTOSH.md"
+	@echo "OpenCore loads it unsigned via Kernel -> Add"
 
 clean:
 	rm -rf $(KEXT) $(OBJDIR)

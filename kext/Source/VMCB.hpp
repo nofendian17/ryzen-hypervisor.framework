@@ -6,18 +6,18 @@
  * every offset on any host. If an offset is wrong the guest silently
  * misbehaves, so those static_asserts are the first line of defence.
  */
-#ifndef RYZENHV_VMCB_HPP
-#define RYZENHV_VMCB_HPP
+#ifndef AMDHV_VMCB_HPP
+#define AMDHV_VMCB_HPP
 
 #include <stddef.h>
 #include <stdint.h>
 
-namespace rhv {
+namespace amdhv {
 namespace vmcb {
 
-#define RHV_PACKED __attribute__((packed))
+#define AMDHV_PACKED __attribute__((packed))
 
-struct RHV_PACKED Seg {
+struct AMDHV_PACKED Seg {
     uint16_t selector;
     uint16_t attrib;     /* VMCB format, see segAttrib() */
     uint32_t limit;
@@ -25,7 +25,7 @@ struct RHV_PACKED Seg {
 };
 
 /* Control area, offsets 0x000 .. 0x3FF. */
-struct RHV_PACKED Control {
+struct AMDHV_PACKED Control {
     uint32_t interceptCr;        /* 0x000 reads in 15:0, writes in 31:16 */
     uint32_t interceptDr;        /* 0x004 */
     uint32_t interceptExc;       /* 0x008 */
@@ -66,7 +66,7 @@ struct RHV_PACKED Control {
 };
 
 /* State save area, offsets 0x400 .. (VMCB-relative). Offsets below are relative to 0x400. */
-struct RHV_PACKED Save {
+struct AMDHV_PACKED Save {
     Seg      es, cs, ss, ds, fs, gs, gdtr, ldtr, idtr, tr;   /* 0x000 .. 0x09F */
     uint8_t  rsvd1[0xCB - 0xA0];
     uint8_t  cpl;                /* 0x0CB */
@@ -99,7 +99,7 @@ struct RHV_PACKED Save {
     uint64_t brFrom, brTo, lastExcFrom, lastExcTo;  /* 0x278 .. 0x290 */
 };
 
-struct RHV_PACKED Vmcb {
+struct AMDHV_PACKED Vmcb {
     Control control;
     Save    save;
     uint8_t pad[4096 - sizeof(Control) - sizeof(Save)];
@@ -109,61 +109,61 @@ static_assert(sizeof(Seg) == 16, "Seg");
 static_assert(sizeof(Control) == 0x400, "Control must be 1 KiB");
 static_assert(sizeof(Vmcb) == 4096, "VMCB must be one page");
 
-#define RHV_VMCB_CTL(f, off)  static_assert(offsetof(Control, f) == (off), "Control." #f)
-RHV_VMCB_CTL(interceptCr,   0x000);
-RHV_VMCB_CTL(interceptDr,   0x004);
-RHV_VMCB_CTL(interceptExc,  0x008);
-RHV_VMCB_CTL(interceptVec3, 0x00C);
-RHV_VMCB_CTL(interceptVec4, 0x010);
-RHV_VMCB_CTL(pauseFilterThresh, 0x03C);
-RHV_VMCB_CTL(iopmBasePa,    0x040);
-RHV_VMCB_CTL(msrpmBasePa,   0x048);
-RHV_VMCB_CTL(tscOffset,     0x050);
-RHV_VMCB_CTL(asid,          0x058);
-RHV_VMCB_CTL(tlbCtl,        0x05C);
-RHV_VMCB_CTL(intCtl,        0x060);
-RHV_VMCB_CTL(intState,      0x068);
-RHV_VMCB_CTL(exitCode,      0x070);
-RHV_VMCB_CTL(exitInfo1,     0x078);
-RHV_VMCB_CTL(exitInfo2,     0x080);
-RHV_VMCB_CTL(exitIntInfo,   0x088);
-RHV_VMCB_CTL(nestedCtl,     0x090);
-RHV_VMCB_CTL(eventInj,      0x0A8);
-RHV_VMCB_CTL(nestedCr3,     0x0B0);
-RHV_VMCB_CTL(clean,         0x0C0);
-RHV_VMCB_CTL(nextRip,       0x0C8);
-RHV_VMCB_CTL(insnLen,       0x0D0);
-#undef RHV_VMCB_CTL
+#define AMDHV_VMCB_CTL(f, off)  static_assert(offsetof(Control, f) == (off), "Control." #f)
+AMDHV_VMCB_CTL(interceptCr,   0x000);
+AMDHV_VMCB_CTL(interceptDr,   0x004);
+AMDHV_VMCB_CTL(interceptExc,  0x008);
+AMDHV_VMCB_CTL(interceptVec3, 0x00C);
+AMDHV_VMCB_CTL(interceptVec4, 0x010);
+AMDHV_VMCB_CTL(pauseFilterThresh, 0x03C);
+AMDHV_VMCB_CTL(iopmBasePa,    0x040);
+AMDHV_VMCB_CTL(msrpmBasePa,   0x048);
+AMDHV_VMCB_CTL(tscOffset,     0x050);
+AMDHV_VMCB_CTL(asid,          0x058);
+AMDHV_VMCB_CTL(tlbCtl,        0x05C);
+AMDHV_VMCB_CTL(intCtl,        0x060);
+AMDHV_VMCB_CTL(intState,      0x068);
+AMDHV_VMCB_CTL(exitCode,      0x070);
+AMDHV_VMCB_CTL(exitInfo1,     0x078);
+AMDHV_VMCB_CTL(exitInfo2,     0x080);
+AMDHV_VMCB_CTL(exitIntInfo,   0x088);
+AMDHV_VMCB_CTL(nestedCtl,     0x090);
+AMDHV_VMCB_CTL(eventInj,      0x0A8);
+AMDHV_VMCB_CTL(nestedCr3,     0x0B0);
+AMDHV_VMCB_CTL(clean,         0x0C0);
+AMDHV_VMCB_CTL(nextRip,       0x0C8);
+AMDHV_VMCB_CTL(insnLen,       0x0D0);
+#undef AMDHV_VMCB_CTL
 
-#define RHV_VMCB_SAVE(f, off) static_assert(offsetof(Save, f) == (off), "Save." #f)
-RHV_VMCB_SAVE(es,     0x000);
-RHV_VMCB_SAVE(cs,     0x010);
-RHV_VMCB_SAVE(ss,     0x020);
-RHV_VMCB_SAVE(ds,     0x030);
-RHV_VMCB_SAVE(fs,     0x040);
-RHV_VMCB_SAVE(gs,     0x050);
-RHV_VMCB_SAVE(gdtr,   0x060);
-RHV_VMCB_SAVE(ldtr,   0x070);
-RHV_VMCB_SAVE(idtr,   0x080);
-RHV_VMCB_SAVE(tr,     0x090);
-RHV_VMCB_SAVE(cpl,    0x0CB);
-RHV_VMCB_SAVE(efer,   0x0D0);
-RHV_VMCB_SAVE(cr4,    0x148);
-RHV_VMCB_SAVE(cr3,    0x150);
-RHV_VMCB_SAVE(cr0,    0x158);
-RHV_VMCB_SAVE(dr7,    0x160);
-RHV_VMCB_SAVE(dr6,    0x168);
-RHV_VMCB_SAVE(rflags, 0x170);
-RHV_VMCB_SAVE(rip,    0x178);
-RHV_VMCB_SAVE(rsp,    0x1D8);
-RHV_VMCB_SAVE(rax,    0x1F8);
-RHV_VMCB_SAVE(star,   0x200);
-RHV_VMCB_SAVE(kernelGsBase, 0x220);
-RHV_VMCB_SAVE(sysenterEip,  0x238);
-RHV_VMCB_SAVE(cr2,    0x240);
-RHV_VMCB_SAVE(gPat,   0x268);
-RHV_VMCB_SAVE(dbgctl, 0x270);
-#undef RHV_VMCB_SAVE
+#define AMDHV_VMCB_SAVE(f, off) static_assert(offsetof(Save, f) == (off), "Save." #f)
+AMDHV_VMCB_SAVE(es,     0x000);
+AMDHV_VMCB_SAVE(cs,     0x010);
+AMDHV_VMCB_SAVE(ss,     0x020);
+AMDHV_VMCB_SAVE(ds,     0x030);
+AMDHV_VMCB_SAVE(fs,     0x040);
+AMDHV_VMCB_SAVE(gs,     0x050);
+AMDHV_VMCB_SAVE(gdtr,   0x060);
+AMDHV_VMCB_SAVE(ldtr,   0x070);
+AMDHV_VMCB_SAVE(idtr,   0x080);
+AMDHV_VMCB_SAVE(tr,     0x090);
+AMDHV_VMCB_SAVE(cpl,    0x0CB);
+AMDHV_VMCB_SAVE(efer,   0x0D0);
+AMDHV_VMCB_SAVE(cr4,    0x148);
+AMDHV_VMCB_SAVE(cr3,    0x150);
+AMDHV_VMCB_SAVE(cr0,    0x158);
+AMDHV_VMCB_SAVE(dr7,    0x160);
+AMDHV_VMCB_SAVE(dr6,    0x168);
+AMDHV_VMCB_SAVE(rflags, 0x170);
+AMDHV_VMCB_SAVE(rip,    0x178);
+AMDHV_VMCB_SAVE(rsp,    0x1D8);
+AMDHV_VMCB_SAVE(rax,    0x1F8);
+AMDHV_VMCB_SAVE(star,   0x200);
+AMDHV_VMCB_SAVE(kernelGsBase, 0x220);
+AMDHV_VMCB_SAVE(sysenterEip,  0x238);
+AMDHV_VMCB_SAVE(cr2,    0x240);
+AMDHV_VMCB_SAVE(gPat,   0x268);
+AMDHV_VMCB_SAVE(dbgctl, 0x270);
+#undef AMDHV_VMCB_SAVE
 
 /* The save area starts at VMCB offset 0x400. */
 static_assert(offsetof(Vmcb, save) == 0x400, "Save area must start at 0x400");
@@ -238,6 +238,6 @@ static const uint16_t ATTR_LDT       = 0x82;
 static const uint16_t ATTR_TSS_BUSY  = 0x8B;
 
 } // namespace vmcb
-} // namespace rhv
+} // namespace amdhv
 
-#endif /* RYZENHV_VMCB_HPP */
+#endif /* AMDHV_VMCB_HPP */

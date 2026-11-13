@@ -1,151 +1,109 @@
-# RyzenHV
+# AMDHV
 
-Virtual machines and Docker on a **Hackintosh with an AMD Ryzen**.
+Run QEMU with `-accel hvf` on a **Hackintosh with an AMD CPU**.
 
-On an Intel Mac, Docker Desktop, Parallels, VirtualBox and QEMU use Apple's `Hypervisor.framework`, which is built on Intel's VT-x. On a Ryzen it
-reports "not supported" (`kern.hv_support` is 0) and they do not start. RyzenHV is a kernel extension that gives them the same API on top of AMD-V (SVM),
-so the unmodified apps run.
+AMDHV is a kernel extension. At boot it registers with macOS **in place of Apple's AppleHV**, so the
+unmodified Hypervisor.framework talks to it. The hardware work is done by AMD-V (SVM).
+It is a simplified rewrite of the RyzenHV project: native mode only, no shim, no client patches.
 
-> **This is an experimental project.** Test it on a USB stick with its own copy of your OpenCore EFI first, and always keep a working EFI **without** the kext.
-> A mistake in kernel code is a panic.
+> **Experimental.** Test on a USB stick with its own OpenCore EFI first. Keep a working EFI **without**
+> this kext. A kernel bug is a panic.
 
-## What works
+## Requirements
 
-| software | state |
-|---|---|
-| **Docker Desktop 4.97.0** (the Intel build) | works with Docker's own, unmodified files: engine, `docker run`, builds, 16 vCPUs |
-| **Parallels Desktop 26.5.0** (build 57613 tested; other builds are tried if their code matches, see below) | **Windows 10 works**: 1–4 vCPUs, keyboard, network, shared folders, Parallels Tools, suspend and resume. A boot takes about 20 seconds. Windows 11 worked in the older (shim) mode |
-| **VirtualBox 7.x** | experimental: version 7.2.22 runs a Windows 10 installation onto a disk (reported by a user, a second report would help). VirtualBox 6.x does **not** work (see below) |
-| **VMware Fusion 26** | **not working yet**: with 0.7.5 the BIOS and its SMM entry work and Windows starts, but the installer stops at the Windows boot logo |
-| **QEMU** with `-accel hvf` | boots Linux |
+- "SVM Mode" **enabled in the BIOS**.
+- Xcode command line tools (`xcode-select --install`).
+- OpenCore.
+- QEMU (MacPorts: `sudo port install qemu`).
 
-Tested on one machine: **Ryzen 7 5800H, macOS Sequoia 15.8.1, OpenCore**. macOS 26 (Tahoe) has not been tried by the author. A user reported (issue 1) that on macOS 26.7.1 with a Ryzen 9 5900X (24 logical CPUs) only one CPU core was online
-when the kext started, so SVM was switched on for that core only and VMs did not run. Version 0.7.4 looks for the late cores again when a VM starts; that user confirmed that
-Parallels (the older shim mode) then runs a fresh Windows 11 LTSC installation, also with 3D acceleration on an RX 6800.
-
-**Not verified:** sleep and wake of the Mac, runs of many hours, 3D acceleration in Parallels (it crashes with the third-party NVIDIA Metal driver on the author's machine, keep it
-off there; it works on an AMD GPU according to a user), Windows 11 or Linux guests in Parallels' native mode, other Parallels builds.
-
-## Install (the ready-made build)
-
-You need **SVM Mode switched on in the BIOS**. Nothing has to be compiled: no Xcode, no Homebrew.
-
-1. Download the archive `ryzenhv-<version>-macos-x86_64.tar.gz` from the Releases page of the project.
-2. Unpack it and open a terminal there:
-   ```bash
-   tar xzf ryzenhv-*-macos-x86_64.tar.gz && cd ryzenhv-*/
-   xattr -dr com.apple.quarantine .      # if you downloaded it with a browser
-   ```
-3. Put the kext into your OpenCore EFI (use the **test EFI** first). This also adds the boot-args and keeps a backup of `config.plist`:
-   ```bash
-   ./rhv kext --native
-   ```
-   Restart from that EFI.
-4. Check everything: `./rhv doctor`. It says what to fix.
-5. Make `kern.hv_support` turn on by itself at every start (Parallels needs it; it is 0 after each restart):
-   ```bash
-   ./rhv autostart install
-   ```
-6. Then whatever you use:
-   - **Docker Desktop:** `./rhv docker-desktop get` (downloads exactly version 4.97.0 from docker.com; skip it if you have that build), quit Docker if it runs, then
-     `./rhv docker-desktop`, then start Docker as usual.
-   - **Parallels Desktop:** `./rhv parallels native`. To undo: `./rhv parallels undo`.
-   - **VirtualBox 7.x:** nothing to install, it uses the kext by itself.
-
-There is also a small app, **RyzenHV**, with buttons for the same steps (kext, automatic start, Parallels, Docker); download it from the same Releases page.
-
-## Creating virtual machines the right way
-
-### Parallels Desktop
-
-1. Create the VM in Parallels as usual (a Windows 10 ISO works best; it is what was tested).
-2. **Before the first start**, with the VM stopped, set three things (replace the name):
-   ```bash
-   prlctl set "My Windows" --hypervisor-type apple
-   prlctl set "My Windows" --cpus 4
-   prlctl set "My Windows" --3d-accelerate off --high-resolution off --high-resolution-in-guest off --vertical-sync off
-   ```
-   The hypervisor type must be **Apple**. 1 to 4 vCPUs were tested. Parallels switches 3D acceleration on again in every **new** VM and it crashes here, so run
-   `./rhv parallels fix-vms` (or the button in the app) after you create each VM.
-3. **Do not hard-stop the VM** (kill, "Stop" with force) during the installation or the first start. Windows may land in "Why did my PC restart?" and automatic repair.
-4. Install **Parallels Tools** in the guest: they give you shared folders, the clipboard and `prlctl exec`.
-5. Give the VM only the memory it needs (4–8 GB is plenty). The kext keeps the guest's memory in RAM while the VM runs.
-6. **Keep the Parallels Desktop app open** when you suspend a VM. With only its background service running, suspending hung twice in the author's tests and the VM
-   could not be stopped until a restart. With the app open it worked every time. If you are not sure, shut Windows down instead of suspending.
-7. After you change the number of vCPUs, shut Windows down completely: `shutdown /s /full /t 0` (Windows' "fast startup" would remember the old count).
-8. After a Parallels update run `./rhv parallels native` again. Only build 57613 (26.5.0) has been tested. For another build `./rhv parallels` looks at the installed files (`./rhv parallels check` shows the same): the places RyzenHV patches (the CPU-vendor check in `prl_vm_app` and in `libMonitor.dylib`, and libMonitor's keyboard handler) are searched by their bytes, in the few forms the same code can take, and the setup goes on only if each is found exactly once, with a warning that the build is untested. If one is not found it stops and says which.
-
-### VirtualBox 7.x
-
-- Use **7.x** (7.2.22 was tested). VirtualBox 6.x was reported to stop with `VERR_SVM_IN_USE` (issue 2): it loads its own driver, which most likely wants to switch AMD-V on
-  itself while RyzenHV already keeps it on. 7.x has no driver on macOS and goes through the kext.
-- In the "New Virtual Machine" window **tick "Skip Unattended Installation"**. The unattended helper adds its own auxiliary ISO; with a custom Windows 10 image that
-  failed with `VERR_ALREADY_EXISTS` and the VM did not even start (it is a VirtualBox setting, not a RyzenHV problem).
-- Type: Windows 10 (64-bit), EFI on, **2 or more vCPUs**, 4 GB of RAM, a new virtual disk of 50 GB or more, and the Windows ISO in the optical drive.
-- At the start the installer says "Press any key to boot from CD or DVD": click into the VM window and press a key quickly.
-- Leave nested virtualization **off** (not tested).
-- VirtualBox's log says `Turtle execution mode`: that is normal here, it means it runs slower than on a real Intel Mac. The installer reaches the disk page in about a
-  minute; a complete installation onto a disk has not been checked yet.
-
-### Docker Desktop
-
-- Only the **Intel build 4.97.0** is supported; `./rhv docker-desktop get` installs it. Turn off automatic updates in Docker's settings; after an update run
-  `./rhv docker-desktop` again.
-- Quit Docker Desktop before running `./rhv docker-desktop`. The step also switches Docker to its HyperKit engine (not "Virtualization framework"); that is on purpose.
-- If Docker does not start after a restart of the Mac, delete the leftover file `~/Library/Containers/com.docker.docker/Data/vms/0/hyperkit.pid` and start it again.
-
-### For every VM
-
-- Shut the VMs down before you restart the Mac. Sleep and wake of the Mac with a running VM has not been tested.
-- One VM program at a time is the safest. Docker next to a running Parallels VM worked in short tests.
-- If a VM does not start, first check `sysctl kern.hv_support`: it must print **1**. If it prints 0, run `./rhv autostart install` (once) or `./bin/rhv-info hv sysctl 1`.
-
-## If something goes wrong
-
-- `./rhv doctor` shows what is missing.
-- `./bin/rhv-info` shows the CPU and SVM state; `./bin/rhv-info log` is the kernel log of the kext. Attach it when you open an issue.
-- If the Mac does not boot: choose the **fallback EFI without the kext** in OpenCore, or add the boot-arg `-rhv_off` (then the kext does nothing).
-- Run `./rhv` from the unpacked **archive**, not from a copy of the source code: the checks need the files that only the archive has.
-
-## For developers
-
-Build from source (needs Xcode's command line tools):
+## Build
 
 ```bash
-make test                # the pure logic, runs anywhere
-make kext tools shim     # build/RyzenHV.kext, build/rhv-info, the shim
-./scripts/install-to-efi.sh /Volumes/EFI    # copies the kext into a mounted OpenCore EFI
+make test          # 8 unit tests, runs anywhere
+make kext tools    # build/AMDHV.kext, build/amd-info, build/hvf-smoke
 ```
 
-Boot-args: `rhv_enable_svm=1` (turn SVM on, off by default), `rhv_allow_users=1` (VMs run as a normal user), `rhv_hv=1` (native mode: the kext is the hypervisor provider),
-`rhv_tpr_shadow=0` (do not offer the TPR shadow), `rhv_clientpatch=1` (**opt-in**: rewrite the CPUID/`verify_gla` branches of a Docker/Parallels client in memory; off by default, so the kext does not touch another process's code unless you ask for it), `rhv_csrelax=0` (do not relax code signing for the VM client; with it on, Docker Desktop in native mode does not need
-`amfi_get_out_of_my_way=0x1`), `rhv_selftest`, `rhv_loglevel`, `rhv_stage`, `-rhv_off`. Diagnostics:
+Note: the kext Makefile does not track header changes. After editing a `.hpp`, run `rm -rf build/kext-obj` first.
+
+## Install
+
+1. Copy the kext into OpenCore and set the two needed boot-args (keeps a `config.plist.amdhv-backup`):
+   ```bash
+   ./scripts/install-to-efi.sh /Volumes/EFI
+   ```
+2. Reboot.
+3. Check:
+   ```bash
+   sysctl kern.hv_support        # must print 1 (the kext sets it automatically)
+   sudo build/amd-info           # SVM must be "active on" every CPU
+   sudo build/amd-info selftest  # verifies SVM state on every CPU
+   ```
+
+## Run a VM
+
+```bash
+./scripts/sign-qemu.sh           # gives QEMU the hypervisor entitlement (again after every upgrade)
+./scripts/qemu-test.sh           # boots a test Linux — everything is working
+qemu-system-x86_64 -accel hvf -cpu host -smp 4 -m 8G -drive file=win10.qcow2,if=virtio
+```
+
+### colima / Docker
+
+Full setup guide: [docs/COLIMA.md](docs/COLIMA.md). In short:
+
+- Use the **qemu** backend: `colima start --vm-type qemu`. The `vz` backend does not work on AMD.
+- Start colima **after** boot, when `kern.hv_support` is already 1 — Lima picks `-accel hvf` at start.
+- MacPorts QEMU already has the hypervisor entitlement — check it again after a `port upgrade qemu`.
+
+## Boot-args
+
+Only two are needed — exactly what `install-to-efi.sh` adds:
 
 ```
-rhv-info                  CPU / SVM
-rhv-info log [-f]         kernel ring log (-f: follow)
-rhv-info stats            event counters
-rhv-info hv               native mode state; "hv sysctl 0|1", "hv tpr 0|1"
-sudo rhv-info selftest    check EFER/VM_HSAVE_PA on every core
+amdhv_enable_svm=1 amdhv_hv=1
 ```
 
-Layout of the sources:
+Everything else is on by default or diagnostics only. Do not add more unless troubleshooting.
+
+| boot-arg | effect |
+|---|---|
+| `amdhv_enable_svm=1` | **required** — turns SVM on |
+| `amdhv_hv=1` | **required** — registers the Hypervisor.framework trap tables |
+| `amdhv_hv_sysctl=0` | optional — leaves `kern.hv_support` alone (default: set it to 1) |
+| `amdhv_tpr_shadow=0` | optional — hides the TPR shadow from guests (default: offered) |
+| `amdhv_selftest=1` | diagnostics — verify SVM state after enable and after wake |
+| `amdhv_loglevel=N` / `amdhv_iolog=N` | diagnostics — log levels, also settable with `amd-info level N` |
+| `-amdhv_off` | **emergency** — kext loads but does nothing |
+
+## Troubleshooting
+
+```bash
+sysctl kern.hv_support          # 1? if not: see boot-args above
+sudo build/amd-info stats       # vmRuns grows while a VM runs; vmFpuMismatches must stay 0
+sudo build/amd-info log -f      # live kernel log
+```
+
+If a RyzenHV kext is still installed, remove it from `EFI/OC/Kexts` and its Kernel → Add entry first:
+the two kexts fight over SVM and only one can register as the hypervisor provider.
+
+## Limits
+
+- 16 vCPUs per VM. One VM program at a time is safest.
+- Sleep/wake with a running VM is untested — shut VMs down first.
+- No entitlement check in native mode: any local process can create a VM. Not for machines with
+  untrusted local users.
+- Verified on this rewrite: **Zen 2** (Matisse) with macOS Sequoia — `hvf-smoke`, `qemu-test.sh`
+  and colima/Docker all pass. The ported core was additionally tested on a Ryzen 7 5800H by the
+  original RyzenHV project. Re-test on yours with `hvf-smoke` and `qemu-test.sh`.
+
+## Sources
 
 ```
-kext/                     the kext: SVM, VMCB, VMRUN, nested page tables, the native front end for Hypervisor.framework
-shim/                     the userland layer for the older (shim) mode and the stand-in library used by native Parallels
-tools/                    rhv-info and the acceptance tests of each phase (hvf-smoke is a test VMM on the public API)
-scripts/                  installers and helpers (Parallels, Docker Desktop, the boot service, EFI install)
-release/                  the `rhv` installer and the packaging of the archive
-app/                      the RyzenHV app (SwiftUI)
-tests/                    unit tests, run by `make test`
-docs/                     the technical documentation (architecture, native mode, debugging)
+kext/          the kext: SVM, VMCB, VMRUN, nested page tables, the Hypervisor.framework front end
+include/       kext ⇄ tools ABI, log ring, VMCS field rules
+tools/         amd-info (the CLI above), hvf-smoke (public-API acceptance test)
+tests/         the 8 unit tests
+scripts/       EFI install, QEMU signing, QEMU boot test, symbol check
 ```
 
-## License
-
-MIT, see `LICENSE`. You may use, change and redistribute the code, also in your own projects, as long as the copyright notice
-and the license text stay with it, so the author is always credited. The archive ships QEMU, which has its own licenses
-(`LICENSES/`). The repository contains nothing from Parallels, Docker or VirtualBox. If you port code from other projects, keep their
-copyright: bhyve (FreeBSD, BSD) can be ported with its copyright kept; Linux KVM is GPL: copying code is not allowed,
-reading it as a reference is.
+MIT license, see `LICENSE`. Ported from RyzenHV (MIT) — keep that copyright when redistributing.

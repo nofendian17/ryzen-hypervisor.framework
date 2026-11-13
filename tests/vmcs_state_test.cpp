@@ -6,11 +6,11 @@
 #include <string.h>
 
 #include "../kext/Source/VmcsState.hpp"
-#include "../shim/rhv_fields.h"
+#include "../include/AMDHVFields.h"
 
-using namespace rhv::vmx;
-using namespace rhv::vmcb;
-namespace msr = rhv::msr;
+using namespace amdhv::vmx;
+using namespace amdhv::vmcb;
+namespace msr = amdhv::msr;
 
 namespace {
 
@@ -347,18 +347,18 @@ void testShimFieldTable()
         uint64_t v = 0;
         Result rr = f.st.read(enc, &v);
         Result wr = f.st.write(enc, 0);
-        int shimRead  = rhv_vmcs_read_status(enc);
-        int shimWrite = rhv_vmcs_write_status(enc, 0);
-        CHECK((rr == R_OK) == (shimRead == RHV_FIELD_OK));
-        int want = wr == R_OK ? RHV_FIELD_OK : wr == R_READ_ONLY ? RHV_FIELD_READ_ONLY : RHV_FIELD_INVALID;
+        int shimRead  = amdhv_vmcs_read_status(enc);
+        int shimWrite = amdhv_vmcs_write_status(enc, 0);
+        CHECK((rr == R_OK) == (shimRead == AMDHV_FIELD_OK));
+        int want = wr == R_OK ? AMDHV_FIELD_OK : wr == R_READ_ONLY ? AMDHV_FIELD_READ_ONLY : AMDHV_FIELD_INVALID;
         if (want != shimWrite) {
             printf("field %#x: kernel %d, shim %d\n", enc, want, shimWrite);
             fails++;
         }
     }
-    CHECK(rhv_vmcs_write_status(0xF010, 0x0000800000000000ull) == RHV_FIELD_BAD_VALUE);     /* non-canonical DR0 */
-    CHECK(rhv_vmcs_write_status(0xF010, 0xFFFF800000000000ull) == RHV_FIELD_OK);
-    CHECK(rhv_vmcs_write_status(0xF002, 0x0000800000000000ull) == RHV_FIELD_OK);            /* DR6 is not loaded */
+    CHECK(amdhv_vmcs_write_status(0xF010, 0x0000800000000000ull) == AMDHV_FIELD_BAD_VALUE);     /* non-canonical DR0 */
+    CHECK(amdhv_vmcs_write_status(0xF010, 0xFFFF800000000000ull) == AMDHV_FIELD_OK);
+    CHECK(amdhv_vmcs_write_status(0xF002, 0x0000800000000000ull) == AMDHV_FIELD_OK);            /* DR6 is not loaded */
 }
 
 } // namespace

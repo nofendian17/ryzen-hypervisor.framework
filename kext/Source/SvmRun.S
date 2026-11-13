@@ -1,7 +1,7 @@
 /*
  * SvmRun.S - enter a guest and come back.
  *
- *   void rhv_svm_vmrun(GuestGprs *regs, uint64_t guestVmcbPa, uint64_t hostVmcbPa);
+ *   void amdhv_svm_vmrun(GuestGprs *regs, uint64_t guestVmcbPa, uint64_t hostVmcbPa);
  *                      rdi              rsi                    rdx
  *
  * Does, with GIF cleared for the whole window:
@@ -41,9 +41,9 @@
 #define G_R15 104
 
     .text
-    .globl SYM(rhv_svm_vmrun)
+    .globl SYM(amdhv_svm_vmrun)
     .p2align 4
-SYM(rhv_svm_vmrun):
+SYM(amdhv_svm_vmrun):
     /* System V: rbx, rbp, r12-r15 belong to the caller. */
     pushq   %rbp
     pushq   %rbx

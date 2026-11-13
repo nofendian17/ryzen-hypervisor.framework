@@ -13,15 +13,15 @@
  * What is not: applying VMX execution controls to VMCB intercepts, and interrupt injection. Those need
  * the vCPU state and come next (docs/PHASE3.md).
  */
-#ifndef RYZENHV_VMXMAP_HPP
-#define RYZENHV_VMXMAP_HPP
+#ifndef AMDHV_VMXMAP_HPP
+#define AMDHV_VMXMAP_HPP
 
 #include <stddef.h>
 #include <stdint.h>
 
 #include "VMCB.hpp"
 
-namespace rhv {
+namespace amdhv {
 namespace vmx {
 
 /* ------------------------------------------------------------------------------------------------------ */
@@ -99,8 +99,8 @@ struct StateMap {
     uint8_t  vmcbSize;   /* bytes in the VMCB */
 };
 
-#define RHV_SAVE_OFF(member) ((uint16_t)(0x400 + offsetof(rhv::vmcb::Save, member)))
-#define RHV_CTL_OFF(member)  ((uint16_t)offsetof(rhv::vmcb::Control, member))
+#define AMDHV_SAVE_OFF(member) ((uint16_t)(0x400 + offsetof(amdhv::vmcb::Save, member)))
+#define AMDHV_CTL_OFF(member)  ((uint16_t)offsetof(amdhv::vmcb::Control, member))
 
 /*
  * Where does `encoding` live? Fields not listed here are KIND_SHADOW if they are valid VMCS fields.
@@ -108,54 +108,54 @@ struct StateMap {
  */
 static inline StateMap mapField(uint32_t enc)
 {
-    using namespace rhv::vmcb;
+    using namespace amdhv::vmcb;
     struct Seg { uint32_t sel, limit, ar, base; uint16_t off; };
     static const Seg kSegs[] = {
-        { 0x0800, 0x4800, 0x4814, 0x6806, RHV_SAVE_OFF(es) },
-        { 0x0802, 0x4802, 0x4816, 0x6808, RHV_SAVE_OFF(cs) },
-        { 0x0804, 0x4804, 0x4818, 0x680a, RHV_SAVE_OFF(ss) },
-        { 0x0806, 0x4806, 0x481a, 0x680c, RHV_SAVE_OFF(ds) },
-        { 0x0808, 0x4808, 0x481c, 0x680e, RHV_SAVE_OFF(fs) },
-        { 0x080a, 0x480a, 0x481e, 0x6810, RHV_SAVE_OFF(gs) },
-        { 0x080c, 0x480c, 0x4820, 0x6812, RHV_SAVE_OFF(ldtr) },
-        { 0x080e, 0x480e, 0x4822, 0x6814, RHV_SAVE_OFF(tr) },
+        { 0x0800, 0x4800, 0x4814, 0x6806, AMDHV_SAVE_OFF(es) },
+        { 0x0802, 0x4802, 0x4816, 0x6808, AMDHV_SAVE_OFF(cs) },
+        { 0x0804, 0x4804, 0x4818, 0x680a, AMDHV_SAVE_OFF(ss) },
+        { 0x0806, 0x4806, 0x481a, 0x680c, AMDHV_SAVE_OFF(ds) },
+        { 0x0808, 0x4808, 0x481c, 0x680e, AMDHV_SAVE_OFF(fs) },
+        { 0x080a, 0x480a, 0x481e, 0x6810, AMDHV_SAVE_OFF(gs) },
+        { 0x080c, 0x480c, 0x4820, 0x6812, AMDHV_SAVE_OFF(ldtr) },
+        { 0x080e, 0x480e, 0x4822, 0x6814, AMDHV_SAVE_OFF(tr) },
     };
     for (const Seg &s : kSegs) {
-        if (enc == s.sel)   return { KIND_VMCB, (uint16_t)(s.off + offsetof(rhv::vmcb::Seg, selector)), 2 };
-        if (enc == s.limit) return { KIND_VMCB, (uint16_t)(s.off + offsetof(rhv::vmcb::Seg, limit)), 4 };
-        if (enc == s.ar)    return { KIND_SEG_AR, (uint16_t)(s.off + offsetof(rhv::vmcb::Seg, attrib)), 2 };
-        if (enc == s.base)  return { KIND_VMCB, (uint16_t)(s.off + offsetof(rhv::vmcb::Seg, base)), 8 };
+        if (enc == s.sel)   return { KIND_VMCB, (uint16_t)(s.off + offsetof(amdhv::vmcb::Seg, selector)), 2 };
+        if (enc == s.limit) return { KIND_VMCB, (uint16_t)(s.off + offsetof(amdhv::vmcb::Seg, limit)), 4 };
+        if (enc == s.ar)    return { KIND_SEG_AR, (uint16_t)(s.off + offsetof(amdhv::vmcb::Seg, attrib)), 2 };
+        if (enc == s.base)  return { KIND_VMCB, (uint16_t)(s.off + offsetof(amdhv::vmcb::Seg, base)), 8 };
     }
     switch (enc) {
     /* GDTR/IDTR have only a base and a limit. */
-    case 0x4810: return { KIND_VMCB, (uint16_t)(RHV_SAVE_OFF(gdtr) + offsetof(rhv::vmcb::Seg, limit)), 4 };
-    case 0x4812: return { KIND_VMCB, (uint16_t)(RHV_SAVE_OFF(idtr) + offsetof(rhv::vmcb::Seg, limit)), 4 };
-    case 0x6816: return { KIND_VMCB, (uint16_t)(RHV_SAVE_OFF(gdtr) + offsetof(rhv::vmcb::Seg, base)), 8 };
-    case 0x6818: return { KIND_VMCB, (uint16_t)(RHV_SAVE_OFF(idtr) + offsetof(rhv::vmcb::Seg, base)), 8 };
+    case 0x4810: return { KIND_VMCB, (uint16_t)(AMDHV_SAVE_OFF(gdtr) + offsetof(amdhv::vmcb::Seg, limit)), 4 };
+    case 0x4812: return { KIND_VMCB, (uint16_t)(AMDHV_SAVE_OFF(idtr) + offsetof(amdhv::vmcb::Seg, limit)), 4 };
+    case 0x6816: return { KIND_VMCB, (uint16_t)(AMDHV_SAVE_OFF(gdtr) + offsetof(amdhv::vmcb::Seg, base)), 8 };
+    case 0x6818: return { KIND_VMCB, (uint16_t)(AMDHV_SAVE_OFF(idtr) + offsetof(amdhv::vmcb::Seg, base)), 8 };
 
-    case 0x6800: return { KIND_VMCB, RHV_SAVE_OFF(cr0), 8 };       /* GUEST_CR0 */
-    case 0x6802: return { KIND_VMCB, RHV_SAVE_OFF(cr3), 8 };       /* GUEST_CR3 */
-    case 0x6804: return { KIND_VMCB, RHV_SAVE_OFF(cr4), 8 };       /* GUEST_CR4 */
-    case 0x681a: return { KIND_VMCB, RHV_SAVE_OFF(dr7), 8 };       /* GUEST_DR7 */
-    case 0x681c: return { KIND_VMCB, RHV_SAVE_OFF(rsp), 8 };       /* GUEST_RSP */
-    case 0x681e: return { KIND_VMCB, RHV_SAVE_OFF(rip), 8 };       /* GUEST_RIP */
-    case 0x6820: return { KIND_VMCB, RHV_SAVE_OFF(rflags), 8 };    /* GUEST_RFLAGS */
+    case 0x6800: return { KIND_VMCB, AMDHV_SAVE_OFF(cr0), 8 };       /* GUEST_CR0 */
+    case 0x6802: return { KIND_VMCB, AMDHV_SAVE_OFF(cr3), 8 };       /* GUEST_CR3 */
+    case 0x6804: return { KIND_VMCB, AMDHV_SAVE_OFF(cr4), 8 };       /* GUEST_CR4 */
+    case 0x681a: return { KIND_VMCB, AMDHV_SAVE_OFF(dr7), 8 };       /* GUEST_DR7 */
+    case 0x681c: return { KIND_VMCB, AMDHV_SAVE_OFF(rsp), 8 };       /* GUEST_RSP */
+    case 0x681e: return { KIND_VMCB, AMDHV_SAVE_OFF(rip), 8 };       /* GUEST_RIP */
+    case 0x6820: return { KIND_VMCB, AMDHV_SAVE_OFF(rflags), 8 };    /* GUEST_RFLAGS */
 
-    case 0x482a: return { KIND_VMCB, RHV_SAVE_OFF(sysenterCs), 8 };   /* GUEST_IA32_SYSENTER_CS (low 32 bits used) */
-    case 0x6824: return { KIND_VMCB, RHV_SAVE_OFF(sysenterEsp), 8 };
-    case 0x6826: return { KIND_VMCB, RHV_SAVE_OFF(sysenterEip), 8 };
-    case 0x2802: return { KIND_VMCB, RHV_SAVE_OFF(dbgctl), 8 };        /* GUEST_IA32_DEBUGCTL */
-    case 0x2804: return { KIND_VMCB, RHV_SAVE_OFF(gPat), 8 };          /* GUEST_IA32_PAT */
-    case 0x2806: return { KIND_EFER, RHV_SAVE_OFF(efer), 8 };          /* GUEST_IA32_EFER */
+    case 0x482a: return { KIND_VMCB, AMDHV_SAVE_OFF(sysenterCs), 8 };   /* GUEST_IA32_SYSENTER_CS (low 32 bits used) */
+    case 0x6824: return { KIND_VMCB, AMDHV_SAVE_OFF(sysenterEsp), 8 };
+    case 0x6826: return { KIND_VMCB, AMDHV_SAVE_OFF(sysenterEip), 8 };
+    case 0x2802: return { KIND_VMCB, AMDHV_SAVE_OFF(dbgctl), 8 };        /* GUEST_IA32_DEBUGCTL */
+    case 0x2804: return { KIND_VMCB, AMDHV_SAVE_OFF(gPat), 8 };          /* GUEST_IA32_PAT */
+    case 0x2806: return { KIND_EFER, AMDHV_SAVE_OFF(efer), 8 };          /* GUEST_IA32_EFER */
 
     /* Controls that are a direct VMCB field. */
-    case 0x2010: return { KIND_VMCB, RHV_CTL_OFF(tscOffset), 8 };      /* CTRL_TSC_OFFSET */
-    case 0x4004: return { KIND_VMCB, RHV_CTL_OFF(interceptExc), 4 };   /* CTRL_EXC_BITMAP: bit n = vector n on both */
+    case 0x2010: return { KIND_VMCB, AMDHV_CTL_OFF(tscOffset), 8 };      /* CTRL_TSC_OFFSET */
+    case 0x4004: return { KIND_VMCB, AMDHV_CTL_OFF(interceptExc), 4 };   /* CTRL_EXC_BITMAP: bit n = vector n on both */
 
     /* Registers the Hypervisor.framework register API has and the VMCS does not. */
-    case X_CR2: return { KIND_VMCB, RHV_SAVE_OFF(cr2), 8 };
-    case X_DR6: return { KIND_VMCB, RHV_SAVE_OFF(dr6), 8 };
-    case X_TPR: return { KIND_VMCB, RHV_CTL_OFF(intCtl), 1 };         /* V_TPR is the low byte of int_ctl */
+    case X_CR2: return { KIND_VMCB, AMDHV_SAVE_OFF(cr2), 8 };
+    case X_DR6: return { KIND_VMCB, AMDHV_SAVE_OFF(dr6), 8 };
+    case X_TPR: return { KIND_VMCB, AMDHV_CTL_OFF(intCtl), 1 };         /* V_TPR is the low byte of int_ctl */
     case X_DR0: return { KIND_EXT_DR, 0, 8 };
     case X_DR1: return { KIND_EXT_DR, 1, 8 };
     case X_DR2: return { KIND_EXT_DR, 2, 8 };
@@ -247,7 +247,7 @@ static inline bool vectorHasErrorCode(unsigned v)
  */
 static inline bool translateExit(const SvmExit &in, VmxExit *out)
 {
-    using namespace rhv::vmcb;
+    using namespace amdhv::vmcb;
     *out = VmxExit();
     const uint64_t code = in.code;
 
@@ -360,6 +360,6 @@ static inline bool translateExit(const SvmExit &in, VmxExit *out)
 }
 
 } // namespace vmx
-} // namespace rhv
+} // namespace amdhv
 
-#endif /* RYZENHV_VMXMAP_HPP */
+#endif /* AMDHV_VMXMAP_HPP */

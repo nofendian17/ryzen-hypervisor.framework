@@ -11,15 +11,15 @@
  * Known gaps (documented in docs/PHASE3.md): CR0/CR4 read shadows, NMI-window exiting, MSR/IO bitmaps given
  * by the guest (we intercept all MSRs and, when I/O exiting is on, all ports), VPID, posted interrupts.
  */
-#ifndef RYZENHV_VMCSSTATE_HPP
-#define RYZENHV_VMCSSTATE_HPP
+#ifndef AMDHV_VMCSSTATE_HPP
+#define AMDHV_VMCSSTATE_HPP
 
 #include <string.h>
 
 #include "MsrMap.hpp"
 #include "VmxMap.hpp"
 
-namespace rhv {
+namespace amdhv {
 namespace vmx {
 
 /* The VMCS fields this class treats specially. */
@@ -128,9 +128,9 @@ static inline uint32_t eventInjFromVmx(uint32_t info, bool *isSoftware)
 class VmcsState {
 public:
     VmcsState() : fVmcb(nullptr) { memset(fShadow, 0, sizeof(fShadow)); memset(fDr, 0, sizeof(fDr)); }
-    explicit VmcsState(rhv::vmcb::Vmcb *vmcb) : fVmcb(vmcb) { memset(fShadow, 0, sizeof(fShadow)); memset(fDr, 0, sizeof(fDr)); }
+    explicit VmcsState(amdhv::vmcb::Vmcb *vmcb) : fVmcb(vmcb) { memset(fShadow, 0, sizeof(fShadow)); memset(fDr, 0, sizeof(fDr)); }
 
-    void attach(rhv::vmcb::Vmcb *vmcb) { fVmcb = vmcb; }
+    void attach(amdhv::vmcb::Vmcb *vmcb) { fVmcb = vmcb; }
     void reset() { memset(fShadow, 0, sizeof(fShadow)); memset(fDr, 0, sizeof(fDr)); fTscAux = 0; }
 
     /* IA32_TSC_AUX of the guest (RDTSCP): the kext puts it in the real MSR while the guest runs. 32 bits. */
@@ -164,7 +164,7 @@ public:
             *out = arFromAttrib((uint16_t)loadBytes(m.vmcbOff, 2));
             return R_OK;
         case KIND_EFER:
-            *out = loadBytes(m.vmcbOff, 8) & ~rhv::vmcb::EFER_SVME;     /* SVME is ours, the guest never sees it */
+            *out = loadBytes(m.vmcbOff, 8) & ~amdhv::vmcb::EFER_SVME;     /* SVME is ours, the guest never sees it */
             return R_OK;
         case KIND_READONLY:
         case KIND_SHADOW:
@@ -208,7 +208,7 @@ public:
             storeBytes(m.vmcbOff, 2, attribFromAr((uint32_t)value));
             return R_OK;
         case KIND_EFER:
-            storeBytes(m.vmcbOff, 8, value | rhv::vmcb::EFER_SVME);
+            storeBytes(m.vmcbOff, 8, value | amdhv::vmcb::EFER_SVME);
             return R_OK;
         case KIND_READONLY:
             return R_READ_ONLY;
@@ -243,7 +243,7 @@ public:
      */
     void applyControls()
     {
-        using namespace rhv::vmcb;
+        using namespace amdhv::vmcb;
         Control &c = fVmcb->control;
         const uint32_t cpu  = (uint32_t)get(F_CPU_BASED);
         const uint32_t cpu2 = (uint32_t)get(F_CPU_BASED2);
@@ -436,13 +436,13 @@ private:
             fShadow[idx] = v & mask(fieldBytes(enc));
     }
 
-    rhv::vmcb::Vmcb *fVmcb;
+    amdhv::vmcb::Vmcb *fVmcb;
     uint64_t         fShadow[kNumFields];
     uint64_t         fDr[4];
     uint64_t         fTscAux = 0;
 };
 
 } // namespace vmx
-} // namespace rhv
+} // namespace amdhv
 
-#endif /* RYZENHV_VMCSSTATE_HPP */
+#endif /* AMDHV_VMCSSTATE_HPP */

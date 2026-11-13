@@ -7,15 +7,15 @@
  *
  * Pure C++, tested on the host (tests/msr_map_test.cpp).
  */
-#ifndef RYZENHV_MSRMAP_HPP
-#define RYZENHV_MSRMAP_HPP
+#ifndef AMDHV_MSRMAP_HPP
+#define AMDHV_MSRMAP_HPP
 
 #include <stddef.h>
 #include <stdint.h>
 
 #include "VMCB.hpp"
 
-namespace rhv {
+namespace amdhv {
 namespace msr {
 
 enum : uint32_t {
@@ -50,26 +50,26 @@ struct Info {
     uint8_t  valueBits;  /* K_VMCB: how many low bits the MSR has (the SYSENTER_CS MSR is 32 bits) */
 };
 
-#define RHV_MSR_SAVE(member) ((uint16_t)(0x400 + offsetof(rhv::vmcb::Save, member)))
+#define AMDHV_MSR_SAVE(member) ((uint16_t)(0x400 + offsetof(amdhv::vmcb::Save, member)))
 
 static inline Info info(uint32_t msr)
 {
-    using rhv::vmcb::Save;
+    using amdhv::vmcb::Save;
     switch (msr) {
     case MSR_TSC:            return { K_TSC, 0, 8, 64 };
-    case MSR_EFER:           return { K_EFER, RHV_MSR_SAVE(efer), 8, 64 };
+    case MSR_EFER:           return { K_EFER, AMDHV_MSR_SAVE(efer), 8, 64 };
     case MSR_TSC_AUX:        return { K_TSC_AUX, 0, 8, 32 };
-    case MSR_PAT:            return { K_VMCB, RHV_MSR_SAVE(gPat), 8, 64 };
-    case MSR_SYSENTER_CS:    return { K_VMCB, RHV_MSR_SAVE(sysenterCs), 8, 32 };
-    case MSR_SYSENTER_ESP:   return { K_VMCB, RHV_MSR_SAVE(sysenterEsp), 8, 64 };
-    case MSR_SYSENTER_EIP:   return { K_VMCB, RHV_MSR_SAVE(sysenterEip), 8, 64 };
-    case MSR_STAR:           return { K_VMCB, RHV_MSR_SAVE(star), 8, 64 };
-    case MSR_LSTAR:          return { K_VMCB, RHV_MSR_SAVE(lstar), 8, 64 };
-    case MSR_CSTAR:          return { K_VMCB, RHV_MSR_SAVE(cstar), 8, 64 };
-    case MSR_SFMASK:         return { K_VMCB, RHV_MSR_SAVE(sfmask), 8, 64 };
-    case MSR_KERNEL_GS_BASE: return { K_VMCB, RHV_MSR_SAVE(kernelGsBase), 8, 64 };
-    case MSR_FS_BASE:        return { K_VMCB, (uint16_t)(RHV_MSR_SAVE(fs) + offsetof(rhv::vmcb::Seg, base)), 8, 64 };
-    case MSR_GS_BASE:        return { K_VMCB, (uint16_t)(RHV_MSR_SAVE(gs) + offsetof(rhv::vmcb::Seg, base)), 8, 64 };
+    case MSR_PAT:            return { K_VMCB, AMDHV_MSR_SAVE(gPat), 8, 64 };
+    case MSR_SYSENTER_CS:    return { K_VMCB, AMDHV_MSR_SAVE(sysenterCs), 8, 32 };
+    case MSR_SYSENTER_ESP:   return { K_VMCB, AMDHV_MSR_SAVE(sysenterEsp), 8, 64 };
+    case MSR_SYSENTER_EIP:   return { K_VMCB, AMDHV_MSR_SAVE(sysenterEip), 8, 64 };
+    case MSR_STAR:           return { K_VMCB, AMDHV_MSR_SAVE(star), 8, 64 };
+    case MSR_LSTAR:          return { K_VMCB, AMDHV_MSR_SAVE(lstar), 8, 64 };
+    case MSR_CSTAR:          return { K_VMCB, AMDHV_MSR_SAVE(cstar), 8, 64 };
+    case MSR_SFMASK:         return { K_VMCB, AMDHV_MSR_SAVE(sfmask), 8, 64 };
+    case MSR_KERNEL_GS_BASE: return { K_VMCB, AMDHV_MSR_SAVE(kernelGsBase), 8, 64 };
+    case MSR_FS_BASE:        return { K_VMCB, (uint16_t)(AMDHV_MSR_SAVE(fs) + offsetof(amdhv::vmcb::Seg, base)), 8, 64 };
+    case MSR_GS_BASE:        return { K_VMCB, (uint16_t)(AMDHV_MSR_SAVE(gs) + offsetof(amdhv::vmcb::Seg, base)), 8, 64 };
     default:                 return { K_UNKNOWN, 0, 0, 0 };
     }
 }
@@ -122,6 +122,6 @@ static inline bool isNative(const uint8_t *msrpm, uint32_t msr)
 }
 
 } // namespace msr
-} // namespace rhv
+} // namespace amdhv
 
-#endif /* RYZENHV_MSRMAP_HPP */
+#endif /* AMDHV_MSRMAP_HPP */

@@ -9,7 +9,7 @@
 
 #include "../kext/Source/FpuState.hpp"
 
-using namespace rhv::fpu;
+using namespace amdhv::fpu;
 
 namespace {
 

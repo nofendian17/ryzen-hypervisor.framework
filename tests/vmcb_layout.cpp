@@ -8,7 +8,7 @@
 
 #include "../kext/Source/VMCB.hpp"
 
-using namespace rhv::vmcb;
+using namespace amdhv::vmcb;
 
 #define CHECK(cond)                                                          \
     do {                                                                     \
