@@ -40,6 +40,7 @@ tools: | $(BUILD)
 		-framework IOKit -framework CoreFoundation
 	$(CC) -arch x86_64 -Wall -Wextra -Wno-nullability-completeness -O2 -o $(BUILD)/hvf-smoke tools/hvf-smoke/main.c \
 		-framework Hypervisor
+	codesign -s - --force --entitlements tools/hvf-smoke/hypervisor.entitlements $(BUILD)/hvf-smoke
 
 kext:
 	$(MAKE) -C kext

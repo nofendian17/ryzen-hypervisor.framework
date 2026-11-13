@@ -13,16 +13,22 @@
 # emergency recovery shell launched" and a "~ #" prompt (no root disk, no network, so Alpine's
 # init gives up there). Leave QEMU with Ctrl-A then X.
 #
-# QEMU and the guest files live in ~/amdhv-qemu:
-#   qemu-system-x86_64       (MacPorts: sudo port install qemu)
-#   guest/vmlinuz-virt       Alpine netboot kernel
-#   guest/initramfs-virt     Alpine netboot initramfs
-# (download both from an Alpine "netboot" release, virt flavor)
+# The guest files live in ~/amdhv-qemu/guest:
+#   vmlinuz-virt       Alpine netboot kernel
+#   initramfs-virt     Alpine netboot initramfs
+# (download both from an Alpine "netboot" release, virt flavor). QEMU itself comes
+# from the PATH (MacPorts: sudo port install qemu).
 
 set -eu
 W="${AMDHV_QEMU_DIR:-$HOME/amdhv-qemu}"
-QEMU="${1:-$W/qemu-system-x86_64}"
-command -v "$QEMU" >/dev/null 2>&1 || [ -x "$QEMU" ] || { echo "no qemu at $QEMU (MacPorts: sudo port install qemu)" >&2; exit 1; }
+if [ -n "${1:-}" ]; then
+    QEMU="$1"
+elif command -v qemu-system-x86_64 >/dev/null 2>&1; then
+    QEMU="$(command -v qemu-system-x86_64)"
+else
+    QEMU="$W/qemu-system-x86_64"
+fi
+[ -x "$QEMU" ] || { echo "no qemu-system-x86_64 in PATH or ~/amdhv-qemu (MacPorts: sudo port install qemu)" >&2; exit 1; }
 [ -f "$W/guest/vmlinuz-virt" ] || { echo "no $W/guest/vmlinuz-virt - see the comment at the top of this script" >&2; exit 1; }
 
 exec "$QEMU" -accel hvf -m 512 -smp 1 -nographic -no-reboot \

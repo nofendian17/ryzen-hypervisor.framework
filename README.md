@@ -92,8 +92,9 @@ the two kexts fight over SVM and only one can register as the hypervisor provide
 - Sleep/wake with a running VM is untested — shut VMs down first.
 - No entitlement check in native mode: any local process can create a VM. Not for machines with
   untrusted local users.
-- Tested hardware: Ryzen 7 5800H and Zen 2, macOS Sequoia. Re-test on yours with `hvf-smoke` and
-  `qemu-test.sh`.
+- Verified on this rewrite: **Zen 2** (Matisse) with macOS Sequoia — `hvf-smoke`, `qemu-test.sh`
+  and colima/Docker all pass. The ported core was additionally tested on a Ryzen 7 5800H by the
+  original RyzenHV project. Re-test on yours with `hvf-smoke` and `qemu-test.sh`.
 
 ## Sources
 
