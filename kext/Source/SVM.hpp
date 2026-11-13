@@ -1,7 +1,5 @@
 /*
  * SVM.hpp - AMD-V (SVM) capability probing and per-CPU enable/disable.
- *
- * Phase 0 only: no VMCB, no VMRUN yet. See docs/ROADMAP.md.
  */
 #ifndef AMDHV_SVM_HPP
 #define AMDHV_SVM_HPP
@@ -12,9 +10,10 @@ namespace amdhv {
 namespace svm {
 
 /*
- * Reads CPUID (and, with readMsrs, VM_CR and EFER) on every logical CPU and fills `out`.
- * Read-only. Without readMsrs the BIOS-disabled/locked flags are unknown and reported as 0:
- * that mode exists to bisect a crash (see boot-arg amdhv_stage).
+ * Reads CPUID, VM_CR and EFER on every logical CPU and fills `out`. Read-only.
+ * The readMsrs=false variant skips the MSR reads (the BIOS-disabled/locked flags
+ * then read as 0); it only exists to bisect a boot crash by passing false from a
+ * modified caller.
  */
 void probe(AMDHVInfo *out, bool readMsrs);
 
