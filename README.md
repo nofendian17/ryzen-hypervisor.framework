@@ -81,12 +81,8 @@ sudo build/amd-info stats       # vmRuns grows while a VM runs; vmFpuMismatches 
 sudo build/amd-info log -f      # live kernel log
 ```
 
-## Coming from RyzenHV
-
-1. Remove `RyzenHV.kext` from `EFI/OC/Kexts` and its Kernel → Add entry. Both kexts fight over SVM.
-2. Delete RyzenHV's leftover boot-args from `config.plist` — every `rhv_*` argument, and above all
-   `amfi_get_out_of_my_way=0x1` (AMDHV needs no AMFI relaxation).
-3. Install AMDHV with `./scripts/install-to-efi.sh`.
+If a RyzenHV kext is still installed, remove it from `EFI/OC/Kexts` and its Kernel → Add entry first:
+the two kexts fight over SVM and only one can register as the hypervisor provider.
 
 ## Limits
 
