@@ -32,7 +32,7 @@ echo "installed: $DEST"
 
 PLIST="$OC/config.plist"
 [ -f "$PLIST" ] || { echo "no config.plist under $OC" >&2; exit 1; }
-[ -f "$PLIST.rhv-backup" ] || cp "$PLIST" "$PLIST.rhv-backup"
+[ -f "$PLIST.amdhv-backup" ] || cp "$PLIST" "$PLIST.amdhv-backup"
 
 /usr/libexec/PlistBuddy -c "Print :Kernel:Add" "$PLIST" >/dev/null 2>&1 || {
     echo "config.plist has no Kernel -> Add array, add the kext entry by hand:" >&2

@@ -9,12 +9,14 @@
  * Root service of the kext. Matches on IOResources (see Info.plist), probes
  * SVM on start() and hands out user clients.
  *
- * Boot-args:
+ * Boot-args parsed here:
  *   -amdhv_off          kill switch: the kext loads but does nothing
- *   amdhv_enable_svm=1  turn SVM on (default is probe only)
- *   amdhv_selftest=1    verify EFER/VM_HSAVE_PA on every CPU after enabling
+ *   amdhv_enable_svm=1  turn SVM on (required; default is probe only)
+ *   amdhv_selftest=1    verify EFER/VM_HSAVE_PA on every CPU after enabling and after wake
  *   amdhv_loglevel=N    see Log.hpp
  *   amdhv_iolog=N       see Log.hpp
+ * The native-mode boot-args (amdhv_hv, amdhv_hv_sysctl, amdhv_tpr_shadow) are
+ * parsed in Frontend.cpp; QEMU needs exactly amdhv_enable_svm=1 amdhv_hv=1.
  */
 class com_amdhv_AMDHV : public IOService {
     OSDeclareDefaultStructors(com_amdhv_AMDHV)

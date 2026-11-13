@@ -8,10 +8,10 @@ kernel extension that registers itself with the kernel **in the place of Apple's
 the **unmodified Hypervisor.framework** talks to it: no injected library, no re-signed app files, no wrappers.
 The hardware work is done by AMD-V (SVM): VMRUN, VMCB, nested page tables.
 
-It is a deliberately small rewrite of the [RyzenHV](https://github.com/) project: same proven core (the VMCS-on-VMCB
+It is a deliberately small rewrite of the RyzenHV project: same proven core (the VMCS-on-VMCB
 translation, the nested page tables, the run loop with its FPU/DR/TSC-AUX state handling and the per-CPU SVM
 self-heal), but **only the native mode** — the dyld shim, the Parallels/Docker client patches and the app-specific
-CPUID fixups are gone. ~6.6k lines of kext instead of ~12.5k.
+CPUID fixups are gone. ~7.3k lines of kext instead of ~13k plus a 3.9k-line shim.
 
 > **This is an experimental project.** Test it on a USB stick with its own copy of your OpenCore EFI first, and
 > always keep a working EFI **without** the kext. A mistake in kernel code is a panic.
@@ -29,6 +29,9 @@ CPUID fixups are gone. ~6.6k lines of kext instead of ~12.5k.
 make test                # pure-logic unit tests, run anywhere (VMCS↔VMCB translation, NPT, MSR maps, FPU)
 make kext tools          # build/AMDHV.kext, build/amd-info, build/hvf-smoke
 ```
+
+Note: the kext Makefile does not track header dependencies — after changing a `.hpp`, `rm -rf build/kext-obj`
+first (or `make clean`) so every user of the header is recompiled.
 
 ## Install
 
@@ -59,18 +62,42 @@ make kext tools          # build/AMDHV.kext, build/amd-info, build/hvf-smoke
 
 ## Boot-args
 
+For QEMU, the minimal set — exactly what `scripts/install-to-efi.sh` adds — is:
+
+```
+amdhv_enable_svm=1 amdhv_hv=1
+```
+
+Everything else below is default-on (the boot-arg only turns it **off**) or diagnostics-only. Do not add more
+to `boot-args` unless you are troubleshooting.
+
 | boot-arg | effect |
 |---|---|
-| `-amdhv_off` | kill switch: the kext loads but does nothing |
-| `amdhv_enable_svm=1` | turn SVM on (EFER.SVME + VM_HSAVE_PA on every CPU); without it the kext only probes |
-| `amdhv_hv=1` | register the Hypervisor.framework trap tables (required for QEMU) |
-| `amdhv_hv_sysctl` | flip `kern.hv_support` to 1 after registering (default 1; `amd-info hv sysctl 0` puts it back) |
-| `amdhv_tpr_shadow` | offer the VMX "use TPR shadow" control to guests (default 1; Windows boots much faster with it) |
-| `amdhv_selftest=1` | verify SVM state on every CPU after enabling and after wake |
-| `amdhv_loglevel` / `amdhv_iolog` | kernel log levels, see `amd-info level` |
+| `amdhv_enable_svm=1` | **required** — turn SVM on (EFER.SVME + VM_HSAVE_PA on every CPU); without it the kext only probes and VM creation fails |
+| `amdhv_hv=1` | **required** — register the Hypervisor.framework trap tables; without it `hv_vm_create` is answered by nothing |
+| `amdhv_hv_sysctl` | flip `kern.hv_support` to 1 after registering — **on by default**; only give `amdhv_hv_sysctl=0` to leave the sysctl alone (`amd-info hv sysctl 1` turns it back on at run time) |
+| `amdhv_tpr_shadow` | offer the VMX "use TPR shadow" control to guests — **on by default** (Windows boots much faster with it); only give `amdhv_tpr_shadow=0` if a guest misbehaves with CR8 |
+| `amdhv_selftest=1` | diagnostics — verify EFER/VM_HSAVE_PA on every CPU after enabling and after wake (also `sudo amd-info selftest` any time) |
+| `amdhv_loglevel=N` / `amdhv_iolog=N` | diagnostics — kernel log levels (also `amd-info level N` at run time) |
+| `-amdhv_off` | **emergency only** — kill switch: the kext loads but does nothing; never leave it in a working config |
+
+No AMFI boot-arg is needed or wanted: AMDHV never touches the client process, so AMFI stays fully intact
+(unlike RyzenHV's shim mode, which needed `amfi_get_out_of_my_way=0x1`).
 
 Run-time control (all also reachable through `amd-info hv ...`): `mode 0|1|2` (unregister/register), `sysctl 0|1`,
 `tpr 0|1` (for VMs created from then on), `rescan` (pick up CPUs that came online late).
+
+## Coming from RyzenHV
+
+AMDHV is a rewrite, not a drop-in update — do not run both kexts, and do not keep the old boot-args:
+
+1. Remove `RyzenHV.kext` from `EFI/OC/Kexts` and its Kernel → Add entry in `config.plist`. Both kexts call
+   `EFER.SVME` on every core, and the kernel accepts only one Hypervisor.framework registration.
+2. Remove the boot-args RyzenHV needed; none of them help AMDHV: `rhv_enable_svm`, `rhv_hv`, `rhv_hv_sysctl`,
+   `rhv_tpr_shadow`, `rhv_allow_users`, `rhv_clientpatch`, `rhv_csrelax`, `rhv_vcpuhint`, `rhv_stage`,
+   `rhv_loglevel`, `rhv_selftest`, `-rhv_off`, and above all `amfi_get_out_of_my_way=0x1` (AMDHV needs no AMFI
+   relaxation at all).
+3. Install AMDHV with `./scripts/install-to-efi.sh` (it keeps a `config.plist.amdhv-backup`).
 
 ## Diagnostics
 
