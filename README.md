@@ -49,6 +49,8 @@ qemu-system-x86_64 -accel hvf -cpu host -smp 4 -m 8G -drive file=win10.qcow2,if=
 
 ### colima / Docker
 
+Full setup guide: [docs/COLIMA.md](docs/COLIMA.md). In short:
+
 - Use the **qemu** backend: `colima start --vm-type qemu`. The `vz` backend does not work on AMD.
 - Start colima **after** boot, when `kern.hv_support` is already 1 — Lima picks `-accel hvf` at start.
 - MacPorts QEMU already has the hypervisor entitlement — check it again after a `port upgrade qemu`.
