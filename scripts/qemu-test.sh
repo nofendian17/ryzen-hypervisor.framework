@@ -14,7 +14,7 @@
 # init gives up there). Leave QEMU with Ctrl-A then X.
 #
 # QEMU and the guest files live in ~/amdhv-qemu:
-#   qemu-system-x86_64       (brew install qemu, then scripts/sign-qemu.sh)
+#   qemu-system-x86_64       (MacPorts: sudo port install qemu)
 #   guest/vmlinuz-virt       Alpine netboot kernel
 #   guest/initramfs-virt     Alpine netboot initramfs
 # (download both from an Alpine "netboot" release, virt flavor)
@@ -22,7 +22,7 @@
 set -eu
 W="${AMDHV_QEMU_DIR:-$HOME/amdhv-qemu}"
 QEMU="${1:-$W/qemu-system-x86_64}"
-command -v "$QEMU" >/dev/null 2>&1 || [ -x "$QEMU" ] || { echo "no qemu at $QEMU (brew install qemu, then scripts/sign-qemu.sh)" >&2; exit 1; }
+command -v "$QEMU" >/dev/null 2>&1 || [ -x "$QEMU" ] || { echo "no qemu at $QEMU (MacPorts: sudo port install qemu)" >&2; exit 1; }
 [ -f "$W/guest/vmlinuz-virt" ] || { echo "no $W/guest/vmlinuz-virt - see the comment at the top of this script" >&2; exit 1; }
 
 exec "$QEMU" -accel hvf -m 512 -smp 1 -nographic -no-reboot \

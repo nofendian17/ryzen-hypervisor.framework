@@ -14,7 +14,7 @@ It is a simplified rewrite of the RyzenHV project: native mode only, no shim, no
 - "SVM Mode" **enabled in the BIOS**.
 - Xcode command line tools (`xcode-select --install`).
 - OpenCore.
-- QEMU (`brew install qemu` or MacPorts).
+- QEMU (MacPorts: `sudo port install qemu`).
 
 ## Build
 
@@ -51,7 +51,7 @@ qemu-system-x86_64 -accel hvf -cpu host -smp 4 -m 8G -drive file=win10.qcow2,if=
 
 - Use the **qemu** backend: `colima start --vm-type qemu`. The `vz` backend does not work on AMD.
 - Start colima **after** boot, when `kern.hv_support` is already 1 — Lima picks `-accel hvf` at start.
-- MacPorts QEMU already has the entitlement; Homebrew QEMU needs `sign-qemu.sh`.
+- MacPorts QEMU already has the hypervisor entitlement — check it again after a `port upgrade qemu`.
 
 ## Boot-args
 

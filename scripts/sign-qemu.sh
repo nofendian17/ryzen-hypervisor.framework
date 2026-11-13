@@ -5,14 +5,19 @@
 # the program runs as root.
 #
 #   ./scripts/sign-qemu.sh [path-to-qemu-system-x86_64]
-#   (default: the Homebrew one, $(brew --prefix)/bin/qemu-system-x86_64)
+#   (default: the MacPorts one, /opt/local/bin/qemu-system-x86_64, then the Homebrew one)
 #
-# Run it again after every `brew upgrade qemu` (the upgrade replaces the binary).
+# Run it again after every upgrade of QEMU (the upgrade replaces the binary).
 
 set -eu
 
-QEMU="${1:-$(brew --prefix 2>/dev/null)/bin/qemu-system-x86_64}"
-[ -x "$QEMU" ] || { echo "no executable at $QEMU" >&2; exit 2; }
+QEMU="${1:-}"
+if [ -z "$QEMU" ]; then
+    for c in /opt/local/bin/qemu-system-x86_64 "$(brew --prefix 2>/dev/null)/bin/qemu-system-x86_64"; do
+        [ -x "$c" ] && QEMU="$c" && break
+    done
+fi
+[ -n "$QEMU" ] && [ -x "$QEMU" ] || { echo "no qemu found (MacPorts: sudo port install qemu)" >&2; exit 2; }
 
 ENT="$(mktemp)"
 trap 'rm -f "$ENT"' EXIT
