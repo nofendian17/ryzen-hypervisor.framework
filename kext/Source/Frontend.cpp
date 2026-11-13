@@ -787,8 +787,14 @@ kern_return_t tVcpuRun(void *target, uint64_t arg)
         if (flags & 0x80) {
             uint32_t n = f->size < v->vm->fpStride ? f->size : v->vm->fpStride;
             bcopy(v->vm->kva[0] + kRwFpOff + v->id * v->vm->fpStride, f->area, n);
-            /* A client can write XSTATE_BV bits while XCR0 is still narrow (it enables AVX afterwards). XRSTOR with a component that XCR0 has
-             * not enabled faults, so the core refuses such an image; trim those bits. They are components still in their initial state. */
+        }
+        /* The client's XCR0 first: the XSTATE_BV trim below must compare against the value the client is
+         * enabling in this same batch (it can write a wider XCR0 and an image using it together). */
+        f->xcr0 = *gprWord(v, R_XCR0);
+        if (flags & 0x80) {
+            /* A client can write XSTATE_BV bits that XCR0 (as it just wrote it) does not enable. XRSTOR with a component that
+             * XCR0 has not enabled faults, so the core refuses such an image; trim those bits. They are components still in
+             * their initial state. */
             if (f->size >= 520) {
                 uint64_t bv;
                 __builtin_memcpy(&bv, f->area + 512, sizeof(bv));
@@ -797,7 +803,6 @@ kern_return_t tVcpuRun(void *target, uint64_t arg)
                     __builtin_memcpy(f->area + 512, &keep, sizeof(keep));
             }
         }
-        f->xcr0 = *gprWord(v, R_XCR0);
         IOReturn fr = cpu->setFpu(f);
         if (fr != kIOReturnSuccess)
             AMDHV_INFO("hv front end: FP state/XCR0 refused by the core (0x%x), xcr0 %#llx", fr, (unsigned long long)f->xcr0);

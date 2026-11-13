@@ -1,6 +1,5 @@
 #include <IOKit/IOLib.h>
 #include <IOKit/IOLocks.h>
-#include <pexpert/pexpert.h>
 
 #include "Frontend.hpp"
 #include "Log.hpp"
