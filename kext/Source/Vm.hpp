@@ -60,8 +60,6 @@ public:
     IOReturn map(task_t task, uint64_t uva, uint64_t gpa, uint64_t size, uint32_t flags);
     IOReturn unmap(uint64_t gpa, uint64_t size);
     IOReturn protect(uint64_t gpa, uint64_t size, uint32_t flags);
-    /* Debugging: reads guest physical memory through the nested page tables. Fails when a page is not mapped. */
-    IOReturn readPhys(uint64_t gpa, void *dst, size_t len);
 
     /* The vCPUs, for kicking them out of the guest. attach() fails with kIOReturnNoResources when the VM is full. */
     IOReturn attach(com_amdhv_AMDHVVm *vcpu, uint32_t *index);
@@ -121,7 +119,6 @@ public:
 
     /* The Hypervisor.framework (VMX-shaped) view of the guest. */
     IOReturn vmcsRead(uint32_t field, uint64_t *value);
-    uint8_t  debugCpl();                                          /* the CPL the VMCB holds (debugging) */
     IOReturn vmcsWrite(uint32_t field, uint64_t value);
 
     /* Guest x87/SSE/AVX state and XCR0. */

@@ -381,36 +381,6 @@ IOReturn com_amdhv_AMDHVVmShared::map(task_t task, uint64_t uva, uint64_t gpa, u
     return rc;
 }
 
-IOReturn com_amdhv_AMDHVVmShared::readPhys(uint64_t gpa, void *dst, size_t len)
-{
-    uint8_t *out = (uint8_t *)dst;
-    IORWLockRead(fRw);                     /* a map/unmap waits; the pages are pinned while they are mapped */
-    IOReturn rc = kIOReturnSuccess;
-    while (len) {
-        const size_t inPage = 4096 - (size_t)(gpa & 0xFFF);
-        const size_t n = len < inPage ? len : inPage;
-        uint64_t hpa = 0;
-        if (!fNpt.lookup(gpa & ~(uint64_t)0xFFF, &hpa, nullptr)) {
-            rc = kIOReturnNotFound;
-            break;
-        }
-        IOMemoryDescriptor *md = IOMemoryDescriptor::withAddressRange(hpa + (gpa & 0xFFF), n, kIODirectionIn | kIOMemoryTypePhysical64, nullptr);
-        if (!md) {
-            rc = kIOReturnNoMemory;
-            break;
-        }
-        const IOByteCount got = md->readBytes(0, out, n);
-        md->release();
-        if (got != n) {
-            rc = kIOReturnIOError;
-            break;
-        }
-        out += n; gpa += n; len -= n;
-    }
-    IORWLockUnlock(fRw);
-    return rc;
-}
-
 IOReturn com_amdhv_AMDHVVmShared::unmap(uint64_t gpa, uint64_t size)
 {
     if (size == 0 || ((gpa | size) & 0xFFF) || gpa >= amdhv::npt::kGpaLimit ||
@@ -1202,11 +1172,6 @@ IOReturn com_amdhv_AMDHVVm::setFpu(const AMDHVFpuState *in)
     bcopy(in->area, fGuestFpu.va, fFpuSize);
     IOLockUnlock(fLock);
     return kIOReturnSuccess;
-}
-
-uint8_t com_amdhv_AMDHVVm::debugCpl()
-{
-    return ((const Vmcb *)fVmcb.va)->save.cpl;
 }
 
 IOReturn com_amdhv_AMDHVVm::vmcsRead(uint32_t field, uint64_t *value)
