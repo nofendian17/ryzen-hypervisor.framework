@@ -70,7 +70,7 @@ void probeThisCpu(int cpu)
     uint32_t r[4];
 
     rhv_cpuid(0, 0, r);
-    p.vendorAmd = rhv_is_amd_vendor(r[1], r[2], r[3]);
+    p.vendorAmd = rhv_is_amd_vendor(r[1], r[2], r[3]) ? 1u : 0u;
     if (!p.vendorAmd)
         return;
 
@@ -452,6 +452,12 @@ int ensureThisCpu()
         rhv_wrmsr(RHV_MSR_EFER, efer | RHV_EFER_SVME);
     if (hsave != gHostSavePa[cpu])
         rhv_wrmsr(RHV_MSR_VM_HSAVE_PA, gHostSavePa[cpu]);
+    /* enableAll/rescan count a CPU in gOn/gActive only when enableAction ran; if EFER/HSAVE drifted later we repaired
+     * them here but the counters stayed behind, so activeOnAllUsable() and the stats would lie. Keep them in sync. */
+    if (!gOn[cpu]) {
+        gOn[cpu] = 1;
+        OSIncrementAtomic(&gActive);
+    }
     OSIncrementAtomic(&gHealed);
     return 1;
 }
