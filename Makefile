@@ -32,6 +32,8 @@ test: | $(BUILD)
 	$(BUILD)/fpu_state_test
 	$(CXX) -std=c++17 -Wall -Wextra -Werror -fsanitize=address,undefined -g -o $(BUILD)/msr_map_test tests/msr_map_test.cpp
 	$(BUILD)/msr_map_test
+	$(CXX) -std=c++17 -Wall -Wextra -Werror -fsanitize=address,undefined -g -o $(BUILD)/slots_test tests/slots_test.cpp
+	$(BUILD)/slots_test
 
 tools: | $(BUILD)
 	$(CC) -arch x86_64 -Wall -Wextra -O2 -o $(BUILD)/amd-info tools/amd-info/main.c \
