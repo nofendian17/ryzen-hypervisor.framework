@@ -93,10 +93,8 @@ AMDHV is a rewrite, not a drop-in update — do not run both kexts, and do not k
 
 1. Remove `RyzenHV.kext` from `EFI/OC/Kexts` and its Kernel → Add entry in `config.plist`. Both kexts call
    `EFER.SVME` on every core, and the kernel accepts only one Hypervisor.framework registration.
-2. Remove the boot-args RyzenHV needed; none of them help AMDHV: `rhv_enable_svm`, `rhv_hv`, `rhv_hv_sysctl`,
-   `rhv_tpr_shadow`, `rhv_allow_users`, `rhv_clientpatch`, `rhv_csrelax`, `rhv_vcpuhint`, `rhv_stage`,
-   `rhv_loglevel`, `rhv_selftest`, `-rhv_off`, and above all `amfi_get_out_of_my_way=0x1` (AMDHV needs no AMFI
-   relaxation at all).
+2. Remove RyzenHV's leftover boot-args from `config.plist` — every `rhv_*` argument, and above all
+   `amfi_get_out_of_my_way=0x1` (AMDHV needs no AMFI relaxation at all).
 3. Install AMDHV with `./scripts/install-to-efi.sh` (it keeps a `config.plist.amdhv-backup`).
 
 ## Diagnostics
