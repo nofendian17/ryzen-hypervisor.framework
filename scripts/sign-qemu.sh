@@ -19,6 +19,12 @@ if [ -z "$QEMU" ]; then
 fi
 [ -n "$QEMU" ] && [ -x "$QEMU" ] || { echo "no qemu found (MacPorts: sudo port install qemu)" >&2; exit 2; }
 
+# Nothing to do when the entitlement is already there (MacPorts ships QEMU with it).
+if codesign -d --entitlements - "$QEMU" 2>/dev/null | grep -q "com.apple.security.hypervisor"; then
+    echo "already entitled, nothing to do: $QEMU"
+    exit 0
+fi
+
 ENT="$(mktemp)"
 trap 'rm -f "$ENT"' EXIT
 cat > "$ENT" <<'EOF'
@@ -27,5 +33,7 @@ cat > "$ENT" <<'EOF'
 <plist version="1.0"><dict><key>com.apple.security.hypervisor</key><true/></dict></plist>
 EOF
 
+# codesign refuses a binary with Finder/resource-fork xattrs ("detritus not allowed").
+xattr -cr "$QEMU" 2>/dev/null || true
 codesign --force --sign - --entitlements "$ENT" "$QEMU"
 codesign --verify --verbose=1 "$QEMU" >/dev/null && echo "signed: $QEMU (ad hoc, com.apple.security.hypervisor)"
