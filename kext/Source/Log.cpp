@@ -32,13 +32,33 @@ uint32_t gIoLogLevel = RHV_LOG_INFO;
 
 const char kLevelChar[] = { '-', 'E', 'W', 'I', 'D', 'T' };
 
+/*
+ * The ring is shared by every CPU, so it needs a lock. Take the interrupt-disabling form only when this CPU
+ * is not already inside our own logging path: a second IOSimpleLockLockDisableInterrupt() on the same CPU
+ * cannot make progress (the first one owns the lock and interrupts are off, so nothing will release it), which
+ * is the shape of a spinlock-acquisition timeout. In that case just append without the lock and count it;
+ * a corrupted log line is far better than a panic, and the counter tells you it happened.
+ */
+volatile SInt32 gLogInFlight[RHV_MAX_CPUS];
+
 void ringAppend(const char *line, uint32_t len)
 {
     if (!gLock)
         return;
+    int cpu = cpu_number();
+    if (cpu >= 0 && cpu < RHV_MAX_CPUS) {
+        if (OSIncrementAtomic(&gLogInFlight[cpu]) != 0) {
+            OSDecrementAtomic(&gLogInFlight[cpu]);
+            OSIncrementAtomic64((volatile SInt64 *)&gStats.logReentries);
+            rhv_ring_write(&gRing, line, len);       /* re-entered on this CPU: best effort */
+            return;
+        }
+    }
     IOInterruptState st = IOSimpleLockLockDisableInterrupt(gLock);
     rhv_ring_write(&gRing, line, len);
     IOSimpleLockUnlockEnableInterrupt(gLock, st);
+    if (cpu >= 0 && cpu < RHV_MAX_CPUS)
+        OSDecrementAtomic(&gLogInFlight[cpu]);
 }
 
 void vwrite(uint32_t level, bool sync, const char *fmt, va_list ap)
@@ -120,10 +140,21 @@ void read(uint64_t cursor, RHVLogChunk *out)
     if (!gLock)
         return;
 
+    /* Same rule as ringAppend: never take the ring lock a second time on the CPU that already holds it. */
+    int cpu = cpu_number();
+    if (cpu >= 0 && cpu < RHV_MAX_CPUS && OSIncrementAtomic(&gLogInFlight[cpu]) != 0) {
+        OSDecrementAtomic(&gLogInFlight[cpu]);
+        OSIncrementAtomic64((volatile SInt64 *)&gStats.logReentries);
+        out->length = rhv_ring_read(&gRing, cursor, out->data, RHV_LOG_CHUNK_DATA, &out->nextCursor,
+                                    &out->dropped);
+        return;
+    }
     IOInterruptState st = IOSimpleLockLockDisableInterrupt(gLock);
     out->length = rhv_ring_read(&gRing, cursor, out->data, RHV_LOG_CHUNK_DATA, &out->nextCursor,
                                 &out->dropped);
     IOSimpleLockUnlockEnableInterrupt(gLock, st);
+    if (cpu >= 0 && cpu < RHV_MAX_CPUS)
+        OSDecrementAtomic(&gLogInFlight[cpu]);
 }
 
 void setLevel(uint32_t level)

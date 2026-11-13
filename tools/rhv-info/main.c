@@ -148,6 +148,7 @@ static int cmd_stats(io_connect_t conn)
     P(selftestRuns);
     P(selftestCpusOk);
     P(logBytesTotal);
+    P(logReentries);
     P(logLevel);
     P(vmCreates);
     P(vmRuns);

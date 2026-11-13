@@ -371,10 +371,18 @@ void relaxSigning(const char *name)
 
 void fixCurrentClient()
 {
+    /*
+     * Opt-in now. These fix-ups rewrite the code of another process (the HyperKit/Parallels client) in place;
+     * if that client is killed by AMFI or runs code the patch did not expect, the process dies. That is the one
+     * kext feature with no "wrong VMCB"-style error message: it either works or the client disappears, which is
+     * also the easiest way to pull the whole machine down (a spinlock panic seen on macOS 24.6.0 while Chrome was
+     * doing normal Mach IPC). Keep the old behaviour available with rhv_clientpatch=1, but do not surprise a user
+     * who never asked for a client fix-up: without it the kext is read-only (probe/SVM/native front end only).
+     */
     static int disabled = -1;
     if (disabled < 0) {
-        uint32_t v = 1;
-        disabled = PE_parse_boot_argn("rhv_clientpatch", &v, sizeof(v)) && v == 0;
+        uint32_t v = 0;
+        disabled = !PE_parse_boot_argn("rhv_clientpatch", &v, sizeof(v)) || v == 0;
     }
     if (disabled)
         return;

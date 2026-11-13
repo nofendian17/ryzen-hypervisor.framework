@@ -28,7 +28,12 @@ branches **by the bytes around them** in that process's executable memory and ch
 (`kext/Source/HvPatch.cpp`). Nothing on disk changes, nothing is signed again. If the bytes are not found exactly once (another Docker
 Desktop build) the process is left alone and `rhv-info log` says so (`rhv-info log | grep "client fix-ups"`).
 This needs code signing relaxed **for the client process** (0.7.9: the kext does that itself before the first patch, see below), which used to mean the global AMFI
-boot-arg (`amfi_get_out_of_my_way=0x1`). `rhv_clientpatch=0` switches the engine off.
+boot-arg (`amfi_get_out_of_my_way=0x1`).
+**The fix-ups are opt-in since 0.7.9:** add `rhv_clientpatch=1` to boot the kext with them (and keep them for Docker/Parallels in native mode). Without the
+boot-arg the kext does **not** rewrite any client's code; it is still the SVM/Hypervisor.framework provider (probe, VM create/run, TPR shadow, etc.), but a
+Docker/Parallels client will see the AMD CPUID and the `verify_gla` mismatch and will refuse to start, exactly like it did before the kext existed. `rhv_clientpatch=0`
+is the same as leaving it out. The opt-in was added after a macOS 24.6.0 spinlock panic (`NMIPI for spinlock acquisition timeout`, no RyzenHV frame in the backtrace)
+where the only in-place client rewrite on the system was this path; it is the one kext feature with no graceful error path if the target is not what the patterns expect.
 Before the first patch the kext logs the process's code-signing flags (`rhv-info log | grep "client fix-ups"`): `signing flags of com.docker.hyperkit: …, enforcement off` is what a machine with AMFI relaxed shows; `enforcement ON` comes with a warning, because on macOS 26.7.1 a HyperKit with enforcement on was killed (`Code Signature Invalid`) right after the patch (issue 1).
 Since 0.7.9 the kext also clears the kill state for the client itself, so the same patch survives on an enforced kernel (see "Without the AMFI boot-arg" below).
 HyperKit's CPUID answers are also cleaned of AMD-only features by the kext (only for HyperKit).

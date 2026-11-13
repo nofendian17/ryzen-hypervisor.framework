@@ -16,6 +16,8 @@ Set them in `Misc → Boot → boot-args` in the OpenCore `config.plist` (or thr
 | `rhv_iolog=N` | up to which level to duplicate into the system log (IOLog). Default 3 |
 | `rhv_stage=N` | **finding the step at which boot crashes**, see below. Without the flag all steps run |
 | `rhv_slow=N` | wait N seconds (at most 10) after announcing each step, to read the screen |
+| `rhv_clientpatch=1` | **opt-in** client fix-ups (native mode: rewrite the CPUID/`verify_gla` branches of a Docker/Parallels client in memory). Off by default; without it the kext does not touch another process's code |
+| `rhv_csrelax=0` | with client fix-ups on: do not clear the client's `CS_KILL`/`CS_HARD` before the patch (the old behavior; the client may then be killed on an enforced kernel) |
 
 ### OpenCore prints `Prelinked injection RyzenHV.kext - Invalid Parameter`
 
@@ -84,7 +86,8 @@ If the buffer overflowed before you read it, `log` prints how many bytes were lo
 
 They answer "did this code run at all?": `probeRuns`, `enableCalls`, `enableFailures`,
 `sleepEvents`/`wakeEvents`, `clientCalls`, `assertFailures`, `selftestCpusOk`, and for VMs `vmCreates`, `vmRuns`,
-`vmExits` (all exits, including host interrupts) and `vmInvalidExits` (VMRUN rejected the VMCB). See also `docs/PHASE1.md`.
+`vmExits` (all exits, including host interrupts) and `vmInvalidExits` (VMRUN rejected the VMCB). `logReentries` is the number of log
+writes that found the ring already locked on the same CPU and were appended without the lock (best effort; normally 0). See also `docs/PHASE1.md`.
 
 ## SVM self-test
 

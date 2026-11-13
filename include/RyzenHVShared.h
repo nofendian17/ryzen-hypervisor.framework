@@ -236,6 +236,7 @@ typedef struct RHVStats {
     uint64_t selftestRuns;
     uint64_t selftestCpusOk;
     uint64_t logBytesTotal;      /* bytes ever written to the kernel log ring */
+    uint64_t logReentries;       /* log writes that found the ring already locked on this CPU: best-effort, no spin */
     uint64_t logLevel;           /* current RHV_LOG_* level */
     uint64_t vmCreates;
     uint64_t vmRuns;             /* VmRun calls */
@@ -373,7 +374,7 @@ typedef struct RHVLogChunk {
 
 /* Compile-time size checks that work in both C and C++. */
 typedef char rhv_assert_log_chunk_size[(sizeof(RHVLogChunk) == RHV_LOG_CHUNK_SIZE) ? 1 : -1];
-typedef char rhv_assert_stats_size[(sizeof(RHVStats) == 25 * sizeof(uint64_t)) ? 1 : -1];
+typedef char rhv_assert_stats_size[(sizeof(RHVStats) == 26 * sizeof(uint64_t)) ? 1 : -1];
 typedef char rhv_assert_regs_size[(sizeof(RHVRegs) == 18 * sizeof(uint64_t)) ? 1 : -1];
 typedef char rhv_assert_fpu_size[(sizeof(RHVFpuState) == 16 + RHV_FPU_AREA_MAX) ? 1 : -1];
 typedef char rhv_assert_exit_size[(sizeof(RHVExit) == 48) ? 1 : -1];

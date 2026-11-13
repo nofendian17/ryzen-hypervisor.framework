@@ -118,7 +118,7 @@ make kext tools shim     # build/RyzenHV.kext, build/rhv-info, the shim
 ```
 
 Boot-args: `rhv_enable_svm=1` (turn SVM on, off by default), `rhv_allow_users=1` (VMs run as a normal user), `rhv_hv=1` (native mode: the kext is the hypervisor provider),
-`rhv_tpr_shadow=0` (do not offer the TPR shadow), `rhv_csrelax=0` (do not relax code signing for the VM client; with it on, Docker Desktop in native mode does not need
+`rhv_tpr_shadow=0` (do not offer the TPR shadow), `rhv_clientpatch=1` (**opt-in**: rewrite the CPUID/`verify_gla` branches of a Docker/Parallels client in memory; off by default, so the kext does not touch another process's code unless you ask for it), `rhv_csrelax=0` (do not relax code signing for the VM client; with it on, Docker Desktop in native mode does not need
 `amfi_get_out_of_my_way=0x1`), `rhv_selftest`, `rhv_loglevel`, `rhv_stage`, `-rhv_off`. Diagnostics:
 
 ```
